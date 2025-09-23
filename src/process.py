@@ -1,0 +1,209 @@
+import argparse
+import cv2
+import numpy as np
+from pathlib import Path
+from utils import Tracker, Renderer
+from models import PersonDetector, GenderClassifier
+
+
+class VideoProcessor:
+    """
+    VideoProcessor with tracking capabilities
+    """
+    def __init__(self, person_conf=0.7, iou_threshold=0.3, gender_conf=0.5, enable_color_heuristic=True, show_segmentation=True):
+        """
+        Initialize VideoProcessor with shared models and tracker
+        """
+        # Store configuration
+        self.person_conf = person_conf
+        self.iou_threshold = iou_threshold
+        self.gender_conf = gender_conf
+        self.enable_color_heuristic = enable_color_heuristic
+        self.show_segmentation = show_segmentation
+        
+        # Initialize shared models
+        print("Initializing shared models...")
+        self.person_detector = PersonDetector(conf=person_conf, enable_color_detection=enable_color_heuristic)
+        self.gender_classifier = GenderClassifier(conf_threshold=gender_conf)
+        
+        # Initialize tracker with shared models
+        self.tracker = Tracker(
+            person_detector=self.person_detector,
+            gender_classifier=self.gender_classifier,
+            iou_threshold=iou_threshold,
+            enable_color_heuristic=enable_color_heuristic
+        )
+        
+        # Initialize renderer
+        self.renderer = Renderer(show_segmentation=show_segmentation)
+        self.video_writer = None  # Will be initialized in setup_input_video
+    
+    def setup_input_video(self, video_name):
+        """
+        Setup input video, validate it exists, create output directory, get properties, and initialize video writer
+        Returns: (cap, fps, width, height, total_frames, output_path) or None if error
+        """
+        # Setup paths
+        project_root = Path(__file__).parent.parent
+        input_path = project_root / "data" / "inputs" / f"{video_name}.mp4"
+        output_path = project_root / "data" / "outputs" / f"{video_name}_output.mp4"
+        
+        # Validate input
+        if not input_path.exists():
+            print(f"Error: Video file {input_path} not found")
+            return None
+        
+        # Setup output directory
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Open video
+        cap = cv2.VideoCapture(str(input_path))
+        if not cap.isOpened():
+            print(f"Error: Could not open video {input_path}")
+            return None
+        
+        # Get video properties
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        # Print video properties
+        print(f"Video properties: {width}x{height}, {fps} FPS, {total_frames} frames")
+        
+        # Setup video writer
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.video_writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+        
+        return cap, fps, width, height, total_frames, output_path
+    
+    def process_frame(self, frame, frame_count, frames_to_skip):
+        """Process a single frame through the unified tracker"""
+        # Delegate everything to the unified tracker
+        detections, tracked_objects = self.tracker.detect_and_track(frame)
+        
+        # Use renderer for annotation
+        if frame_count > frames_to_skip:
+            annotated_frame = self.renderer.annotate(frame, detections, tracked_objects)
+        else:
+            annotated_frame = frame
+        
+        return annotated_frame, len(tracked_objects)
+    
+    def update_progress(self, frame_count, total_frames, last_progress, active_tracks):
+        """Update and display progress with tracking info"""
+        current_progress = int((frame_count / total_frames) * 100)
+        if current_progress >= last_progress + 10 and current_progress <= 100:
+            print(f"Progress: {current_progress}% ({frame_count}/{total_frames} frames) - Active tracks: {active_tracks}")
+            return current_progress
+        return last_progress
+    
+    def process_video(self, video_name):
+        """Main video processing pipeline with tracking"""
+        # Setup input video and get all necessary data
+        result = self.setup_input_video(video_name)
+        if result is None:
+            return
+        
+        cap, fps, width, height, total_frames, output_path = result
+        
+        # Calculate frames to skip (1 second)
+        frames_to_skip = fps
+        
+        # Process frames
+        frame_count = 0
+        last_progress = 0
+        total_tracks = 0
+        
+        print(f"Processing video with tracking... (skipping first {frames_to_skip} frames)")
+        
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                frame_count += 1
+                
+                # Process frame
+                annotated_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+                total_tracks = max(total_tracks, active_tracks)
+                
+                # Write frame to output video
+                self.video_writer.write(annotated_frame)
+                
+                # Update progress
+                last_progress = self.update_progress(frame_count, total_frames, last_progress, active_tracks)
+        
+        except KeyboardInterrupt:
+            print("\nProcessing interrupted by user")
+        
+        finally:
+            # Clean up
+            cap.release()
+            self.video_writer.release()
+            cv2.destroyAllWindows()
+            
+            print(f"Processing complete! Output saved to: {output_path}")
+            print(f"Maximum active tracks: {total_tracks}")
+
+
+def parsing_argument():
+    parser = argparse.ArgumentParser(description="Run person detection and tracking on video")
+    parser.add_argument(
+        "--video_name",
+        required=True,
+        help="Name of the video file in data/inputs directory (without extension)"
+    )
+    parser.add_argument(
+        "--person_conf",
+        type=float,
+        default=0.25,
+        help="Confidence threshold for person detection"
+    )
+    parser.add_argument(
+        "--iou",
+        type=float,
+        default=0.5,
+        help="IOU threshold for tracking (default: 0.3)"
+    )
+    parser.add_argument(
+        "--gender_conf",
+        type=float,
+        default=0.5,
+        help="Confidence threshold for gender classification"
+    )
+    parser.add_argument(
+        "--pure",
+        action="store_true",
+        help="Use pure deepface model without color-based heuristic (default: use color heuristic)"
+    )
+    parser.add_argument(
+        "--simple",
+        action="store_true",
+        help="Disable segmentation mask display (default: show segmentation)"
+    )
+    return parser.parse_args()
+
+
+def main():
+    """
+    Run person detection and tracking
+    """
+    args = parsing_argument()
+    video_name = args.video_name
+    person_conf = args.person_conf
+    iou_threshold = args.iou
+    gender_conf = args.gender_conf
+    enable_color_heuristic = not args.pure  # Invert: --pure means disable color heuristic
+    show_segmentation = not args.simple     # Invert: --simple means disable segmentation
+
+    # Initialize VideoProcessor with tracking
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=enable_color_heuristic, show_segmentation=show_segmentation)
+    
+    # Process video
+    processor.process_video(video_name)
+
+
+if __name__ == "__main__":
+    main()

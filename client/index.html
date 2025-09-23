@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gender Detection Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        .status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        select, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .video-container {
+            text-align: center;
+            background: #000;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .video-container img {
+            max-width: 100%;
+            height: auto;
+        }
+        .debug {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 3px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gender Detection Dashboard</h1>
+        </div>
+        
+        <div class="content">
+            <!-- Server Status -->
+            <div class="section">
+                <h3>Server Status</h3>
+                <p>FastAPI Server: <span id="fastapi-status" class="status offline">Checking...</span></p>
+                <p>Triton Server: <span id="triton-status" class="status offline">Checking...</span></p>
+            </div>
+            
+            <!-- Video Controls -->
+            <div class="section">
+                <h3>Video Controls</h3>
+                <p>
+                    <label>Select Video: </label>
+                    <select id="video-select">
+                        <option value="">Choose a video...</option>
+                    </select>
+                </p>
+                <p>
+                    <button id="pause-tracking" disabled>Pause</button>
+                    <button id="resume-tracking" disabled>Resume</button>
+                </p>
+            </div>
+            
+            <!-- Video Display -->
+            <div class="section">
+                <h3>Video Stream</h3>
+                <div class="video-container">
+                    <div style="position: relative; width: 100%; height: 100%;">
+                        <img id="video-stream" src="" alt="Video stream" style="display: none; width: 100%; height: 100%; object-fit: contain;">
+                        <canvas id="overlay-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></canvas>
+                    </div>
+                    <p id="video-placeholder">Select a video to begin tracking</p>
+                </div>
+            </div>
+            
+            <!-- Debug Info -->
+            <div class="section">
+                <h3>Debug Information</h3>
+                <div id="debug-log" class="debug"></div>
+                <button id="clear-debug">Clear Log</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simple logging function
+        function log(message) {
+            var debug = document.getElementById('debug-log');
+            var time = new Date().toLocaleTimeString();
+            debug.innerHTML += '[' + time + '] ' + message + '\n';
+            debug.scrollTop = debug.scrollHeight;
+        }
+        
+        // Clear debug log
+        document.getElementById('clear-debug').onclick = function() {
+            document.getElementById('debug-log').innerHTML = '';
+        };
+        
+        // State management
+        var state = {
+            videos: [],
+            selectedVideo: null,
+            isTracking: false,
+            isPaused: false,
+            servers: {
+                fastapi: false,
+                triton: false
+            }
+        };
+        
+        // Use relative URLs to go through the proxy
+        var API_BASE_URL = '';  // Will use relative URLs
+        var TRITON_BASE_URL = '';  // Will use relative URLs
+        
+        // API functions using XMLHttpRequest
+        function makeRequest(method, url, callback, errorCallback, data) {
+            var xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4) {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            var responseData = JSON.parse(xhr.responseText);
+                            callback(responseData);
+                        } catch (e) {
+                            callback({ success: true });
+                        }
+                    } else {
+                        if (errorCallback) {
+                            errorCallback(new Error('HTTP ' + xhr.status + ': ' + xhr.responseText));
+                        }
+                    }
+                }
+            };
+            xhr.onerror = function() {
+                if (errorCallback) {
+                    errorCallback(new Error('Network error'));
+                }
+            };
+            xhr.open(method, url, true);
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            
+            if (data && method === 'POST') {
+                xhr.send(JSON.stringify(data));
+            } else {
+                xhr.send();
+            }
+        }
+        
+        // Check server status
+        function checkServers() {
+            log('Checking server status...');
+            
+            // Check FastAPI
+            makeRequest('GET', '/api/videos', function(data) {
+                state.servers.fastapi = true;
+                document.getElementById('fastapi-status').textContent = 'Online';
+                document.getElementById('fastapi-status').className = 'status online';
+                log('FastAPI server: Online');
+            }, function(error) {
+                state.servers.fastapi = false;
+                document.getElementById('fastapi-status').textContent = 'Offline';
+                document.getElementById('fastapi-status').className = 'status offline';
+                log('FastAPI server: Offline - ' + error.message);
+            });
+            
+            // Check Triton
+            makeRequest('GET', '/v2/health/ready', function(data) {
+                state.servers.triton = true;
+                document.getElementById('triton-status').textContent = 'Online';
+                document.getElementById('triton-status').className = 'status online';
+                log('Triton server: Online');
+            }, function(error) {
+                state.servers.triton = false;
+                document.getElementById('triton-status').textContent = 'Offline';
+                document.getElementById('triton-status').className = 'status offline';
+                log('Triton server: Offline - ' + error.message);
+            });
+        }
+        
+        // Load videos
+        function loadVideos() {
+            log('Loading videos...');
+            makeRequest('GET', '/api/videos', function(data) {
+                state.videos = data.videos;
+                var select = document.getElementById('video-select');
+                select.innerHTML = '<option value="">Choose a video...</option>';
+                
+                for (var i = 0; i < state.videos.length; i++) {
+                    var video = state.videos[i];
+                    var option = document.createElement('option');
+                    option.value = video.value;
+                    option.textContent = video.label;
+                    select.appendChild(option);
+                }
+                
+                log('Loaded ' + state.videos.length + ' videos');
+                log('Video options: ' + state.videos.map(function(v) { return v.label; }).join(', '));
+            }, function(error) {
+                log('Error loading videos: ' + error.message);
+            });
+        }
+        
+        // Start tracking
+        function startTracking() {
+            var videoValue = document.getElementById('video-select').value;
+            if (!videoValue) {
+                alert('Please select a video first');
+                return;
+            }
+            
+            // Stop any existing streams first
+            stopTracking();
+            
+            log('Starting tracking for video: ' + videoValue);
+            makeRequest('POST', '/api/start-tracking', function(data) {
+                state.isTracking = true;
+                state.isPaused = false;
+                state.selectedVideo = videoValue;
+                
+                // Update UI
+                document.getElementById('pause-tracking').disabled = false;
+                document.getElementById('resume-tracking').disabled = true;
+                
+                // Start dual-layer streams
+                var videoStream = document.getElementById('video-stream');
+                videoStream.src = '/api/video-stream/' + videoValue;
+                videoStream.style.display = 'block';
+                document.getElementById('video-placeholder').style.display = 'none';
+                log('Video stream URL: /api/video-stream/' + videoValue);
+                
+                // Start inference stream
+                startInferenceStream(videoValue);
+                
+                // Add event listeners for video stream debugging
+                videoStream.onload = function() {
+                    log('Video stream loaded successfully');
+                    // Update canvas size when video loads
+                    if (overlayCanvas && overlayCtx) {
+                        overlayCanvas.width = videoStream.offsetWidth;
+                        overlayCanvas.height = videoStream.offsetHeight;
+                    }
+                };
+                videoStream.onerror = function(e) {
+                    log('Video stream error: ' + (e.message || 'Unknown error'));
+                    // Try to reload the video stream
+                    setTimeout(function() {
+                        if (videoStream.src) {
+                            log('Retrying video stream...');
+                            videoStream.src = videoStream.src;
+                        }
+                    }, 1000);
+                };
+                
+                log('Tracking started successfully');
+            }, function(error) {
+                log('Error starting tracking: ' + error.message);
+            }, { video_num: videoValue });
+        }
+        
+        // Pause tracking
+        function pauseTracking() {
+            log('Pausing tracking...');
+            makeRequest('POST', '/api/pause-tracking', function(data) {
+                state.isPaused = true;
+                document.getElementById('pause-tracking').disabled = true;
+                document.getElementById('resume-tracking').disabled = false;
+                log('Tracking paused');
+            }, function(error) {
+                log('Error pausing tracking: ' + error.message);
+            }, {});
+        }
+        
+        // Resume tracking
+        function resumeTracking() {
+            log('Resuming tracking...');
+            makeRequest('POST', '/api/resume-tracking', function(data) {
+                state.isPaused = false;
+                document.getElementById('pause-tracking').disabled = false;
+                document.getElementById('resume-tracking').disabled = true;
+                log('Tracking resumed');
+            }, function(error) {
+                log('Error resuming tracking: ' + error.message);
+            }, {});
+        }
+        
+        // Stop tracking
+        function stopTracking() {
+            log('Stopping tracking...');
+            state.isTracking = false;
+            state.isPaused = false;
+            state.selectedVideo = null;
+            
+            // Update UI
+            document.getElementById('pause-tracking').disabled = true;
+            document.getElementById('resume-tracking').disabled = true;
+            
+            // Hide video stream and stop inference
+            var videoStream = document.getElementById('video-stream');
+            videoStream.src = '';
+            videoStream.style.display = 'none';
+            document.getElementById('video-placeholder').style.display = 'block';
+            
+            // Stop inference stream
+            stopInferenceStream();
+            
+            log('Tracking stopped');
+        }
+        
+        // Event listeners
+        document.getElementById('pause-tracking').onclick = pauseTracking;
+        document.getElementById('resume-tracking').onclick = resumeTracking;
+        
+        // Video selection change handler - auto-start tracking
+        document.getElementById('video-select').onchange = function() {
+            var videoValue = this.value;
+            log('Video selected: ' + videoValue);
+            
+            if (videoValue) {
+                // Auto-start tracking when video is selected
+                startTracking();
+            } else {
+                // Stop tracking when no video selected
+                stopTracking();
+            }
+        };
+        
+                // Inference stream handling
+                var inferenceEventSource = null;
+                var overlayCanvas = null;
+                var overlayCtx = null;
+                
+                function startInferenceStream(videoValue) {
+                    log('Starting inference stream for video: ' + videoValue);
+                    
+                    // Close existing stream
+                    if (inferenceEventSource) {
+                        inferenceEventSource.close();
+                        inferenceEventSource = null;
+                    }
+                    
+                    // Get canvas context
+                    overlayCanvas = document.getElementById('overlay-canvas');
+                    overlayCtx = overlayCanvas.getContext('2d');
+                    
+                    // Start new EventSource for inference data (using Triton batch endpoint)
+                    inferenceEventSource = new EventSource('/api/batch-inference/' + videoValue);
+                    
+                    inferenceEventSource.onmessage = function(event) {
+                        try {
+                            var data = JSON.parse(event.data);
+                            if (data.batch) {
+                                // Process the batch of inference results
+                                processInferenceBatch(data.batch);
+                            }
+                        } catch (e) {
+                            log('Error parsing inference data: ' + e.message);
+                        }
+                    };
+                    
+                    inferenceEventSource.onerror = function(event) {
+                        log('Inference stream error: ' + event.type);
+                        // Try to reconnect after a delay
+                        setTimeout(function() {
+                            if (inferenceEventSource && inferenceEventSource.readyState === EventSource.CLOSED) {
+                                log('Attempting to reconnect inference stream...');
+                                startInferenceStream(videoValue);
+                            }
+                        }, 2000);
+                    };
+                    
+                    inferenceEventSource.onopen = function(event) {
+                        log('Inference stream connected');
+                    };
+                }
+                
+                function processInferenceBatch(batch) {
+                    // Clear previous overlay
+                    if (overlayCtx && overlayCanvas) {
+                        // Resize canvas to match video
+                        var video = document.getElementById('video-stream');
+                        if (video && video.naturalWidth > 0) {
+                            overlayCanvas.width = video.offsetWidth;
+                            overlayCanvas.height = video.offsetHeight;
+                        }
+                        
+                        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                        
+                        // Draw tracking boxes for the latest frame
+                        if (batch.length > 0) {
+                            var latestFrame = batch[batch.length - 1];
+                            drawTrackingBoxes(latestFrame.tracks);
+                        }
+                    }
+                }
+                
+                function drawTrackingBoxes(tracks) {
+                    if (!overlayCtx || !overlayCanvas) return;
+                    
+                    // Get video dimensions
+                    var video = document.getElementById('video-stream');
+                    if (!video || video.naturalWidth === 0) return;
+                    
+                    // Calculate scale factors
+                    var scaleX = overlayCanvas.width / video.naturalWidth;
+                    var scaleY = overlayCanvas.height / video.naturalHeight;
+                    
+                    // Draw each track
+                    for (var i = 0; i < tracks.length; i++) {
+                        var track = tracks[i];
+                        var bbox = track.bbox;
+                        var x = bbox[0] * scaleX;
+                        var y = bbox[1] * scaleY;
+                        var width = (bbox[2] - bbox[0]) * scaleX;
+                        var height = (bbox[3] - bbox[1]) * scaleY;
+                        
+                        // Draw bounding box
+                        overlayCtx.strokeStyle = track.gender === 'Man' ? '#00ff00' : '#ff00ff';
+                        overlayCtx.lineWidth = 2;
+                        overlayCtx.strokeRect(x, y, width, height);
+                        
+                        // Draw label
+                        overlayCtx.fillStyle = track.gender === 'Man' ? '#00ff00' : '#ff00ff';
+                        overlayCtx.font = '14px Arial';
+                        overlayCtx.fillText(track.gender + ' (ID: ' + track.id + ')', x, y - 5);
+                    }
+                }
+                
+                function stopInferenceStream() {
+                    if (inferenceEventSource) {
+                        inferenceEventSource.close();
+                        inferenceEventSource = null;
+                    }
+                    
+                    // Clear overlay
+                    if (overlayCtx && overlayCanvas) {
+                        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                    }
+                }
+                
+                // Initialize on page load
+                window.onload = function() {
+                    log('Page loaded - initializing...');
+                    log('API Base URL: ' + (API_BASE_URL || 'relative URLs'));
+                    log('Triton Base URL: ' + (TRITON_BASE_URL || 'relative URLs'));
+                    log('Current domain: ' + window.location.host);
+                    checkServers();
+                    loadVideos();
+                    
+                    // Check servers every 10 seconds
+                    setInterval(checkServers, 10000);
+                };
+    </script>
+</body>
+</html>
