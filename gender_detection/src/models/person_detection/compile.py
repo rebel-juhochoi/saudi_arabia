@@ -4,7 +4,7 @@ from ultralytics import YOLO
 
 
 def main():
-    model_name = "yolov11n-seg"
+    model_name = "yolo11n-seg"
 
     model = YOLO(model_name + ".pt").model
     model.eval()

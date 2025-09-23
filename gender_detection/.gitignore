@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+uv.lock
+.python-version
+pyproject.toml
 
 # Virtual environments
 venv/
@@ -83,3 +86,4 @@ yarn-error.log*
 
 # Project specific
 .archived/
+

@@ -7,6 +7,7 @@ from ultralytics import YOLO
 from ultralytics.data.augment import LetterBox
 from ultralytics.engine.results import Results
 from ultralytics.utils import ops
+from ultralytics.utils.nms import non_max_suppression
 
 
 class PersonDetector:
@@ -60,7 +61,7 @@ class PersonDetector:
         box_cls = torch.from_numpy(preds[0][:, : self.cfg["box_cls_dim"], :])
         masks = torch.from_numpy(preds[4])
         new_preds = [torch.cat((box_cls, masks), dim=1), tuple(torch.from_numpy(p) for p in preds[1:6])]
-        p = ops.non_max_suppression(
+        p = non_max_suppression(
             new_preds[0],
             self.cfg["conf"],
             self.cfg["iou"],

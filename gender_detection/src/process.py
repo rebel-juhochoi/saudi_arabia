@@ -151,7 +151,7 @@ class VideoProcessor:
 def parsing_argument():
     parser = argparse.ArgumentParser(description="Run person detection and tracking on video")
     parser.add_argument(
-        "--video_name",
+        "--input",
         required=True,
         help="Name of the video file in data/inputs directory (without extension)"
     )
@@ -180,7 +180,7 @@ def parsing_argument():
     )
     parser.add_argument(
         "--simple",
-        action="store_true",
+        action="store_false",
         help="Disable segmentation mask display (default: show segmentation)"
     )
     return parser.parse_args()
@@ -191,7 +191,7 @@ def main():
     Run person detection and tracking
     """
     args = parsing_argument()
-    video_name = args.video_name
+    video_name = args.input
     person_conf = args.person_conf
     iou_threshold = args.iou
     gender_conf = args.gender_conf
