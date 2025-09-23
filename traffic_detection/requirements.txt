@@ -1,0 +1,18 @@
+# models requirements
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.0
+torchvision<=0.22.0
+ultralytics
+tensorflow
+tf-keras
+deepface
+opencv-python
+
+# server requirements (FastAPI + Triton)
+fastapi
+uvicorn
+uvicorn[standard]
+websockets
+python-multipart
+tritonclient[http]
+tritonclient[grpc]

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Detection Demo</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎥</text></svg>" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-video"></i> Traffic Detection Demo</h1>
+            <p>Real-time vehicle detection and traffic counting</p>
+        </header>
+
+        <main>
+            <!-- Server Status -->
+            <div class="status-panel">
+                <div id="server-status" class="status-indicator offline">
+                    <i class="fas fa-circle"></i>
+                    <span>Server Status: <span id="status-text">Checking...</span></span>
+                </div>
+            </div>
+
+            <!-- Demo Control -->
+            <div class="demo-control-panel">
+                <h2><i class="fas fa-play"></i> Traffic Detection Demo</h2>
+                <div class="demo-controls">
+                    <button id="start-demo-btn" class="primary-btn">
+                        <i class="fas fa-play"></i>
+                        Start Detection
+                    </button>
+                    <button id="stop-demo-btn" class="secondary-btn" style="display: none;">
+                        <i class="fas fa-stop"></i>
+                        Stop Detection
+                    </button>
+                </div>
+                <div class="demo-info">
+                    <p>Click "Start Detection" to begin real-time vehicle detection and traffic counting on the demo video.</p>
+                </div>
+            </div>
+
+            <!-- Processing Status -->
+            <div id="processing-panel" class="processing-panel" style="display: none;">
+                <h2><i class="fas fa-spinner fa-spin"></i> Processing Video</h2>
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <div id="progress-text" class="progress-text">0%</div>
+                </div>
+                <div id="status-message" class="status-message">Initializing...</div>
+                <div id="job-info" class="job-info">
+                    <div>Job ID: <span id="job-id">-</span></div>
+                    <div>Configuration: <span id="used-config">-</span></div>
+                </div>
+            </div>
+
+            <!-- Streaming Video Display -->
+            <div id="video-panel" class="video-panel" style="display: none;">
+                <h2><i class="fas fa-eye"></i> Live Traffic Detection</h2>
+                <div class="streaming-container">
+                    <canvas id="video-canvas" width="800" height="600"></canvas>
+                    <div class="streaming-info">
+                        <div id="stream-status" class="stream-status">Connecting...</div>
+                    </div>
+                </div>
+                
+                <!-- Traffic Count Dashboard -->
+                <div id="traffic-dashboard" class="traffic-dashboard" style="display: none;">
+                    <h3><i class="fas fa-chart-bar"></i> Traffic Analytics</h3>
+                    <div class="traffic-stats">
+                        <div class="stat-card">
+                            <div class="stat-value" id="total-vehicles">0</div>
+                            <div class="stat-label">Total Vehicles</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value" id="vehicles-per-minute">0.0</div>
+                            <div class="stat-label">Vehicles/Min</div>
+                        </div>
+                    </div>
+                    <div id="road-counts" class="road-counts">
+                        <!-- Road-specific counts will be populated here -->
+                    </div>
+                    <div class="dashboard-controls">
+                        <button id="reset-counters-btn" class="secondary-btn">
+                            <i class="fas fa-redo"></i>
+                            Reset Counters
+                        </button>
+                        <button id="export-analytics-btn" class="secondary-btn">
+                            <i class="fas fa-download"></i>
+                            Export Analytics
+                        </button>
+                    </div>
+                </div>
+                <div class="streaming-controls">
+                    <div class="control-group">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="segmentation-toggle">
+                            <span class="toggle-slider"></span>
+                            <span class="toggle-label">
+                                <i class="fas fa-eye"></i>
+                                Show Segmentation Masks
+                            </span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Panel -->
+            <div id="error-panel" class="error-panel" style="display: none;">
+                <h2><i class="fas fa-exclamation-triangle"></i> Error</h2>
+                <div id="error-message" class="error-message"></div>
+                <button id="retry-btn" class="retry-btn">
+                    <i class="fas fa-redo"></i>
+                    Try Again
+                </button>
+            </div>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 Vehicle Detection Demo | Powered by RBLN Technologies</p>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
