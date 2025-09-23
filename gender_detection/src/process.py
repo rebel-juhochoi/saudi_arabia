@@ -80,7 +80,7 @@ class VideoProcessor:
     def process_frame(self, frame, frame_count, frames_to_skip):
         """Process a single frame through the unified tracker"""
         # Delegate everything to the unified tracker
-        detections, tracked_objects = self.tracker.detect_and_track(frame)
+        detections, tracked_objects = self.tracker.detect_and_track(frame, frame.shape)
         
         # Use renderer for annotation
         if frame_count > frames_to_skip:
@@ -150,11 +150,11 @@ class VideoProcessor:
 
 def parsing_argument():
     parser = argparse.ArgumentParser(description="Run person detection and tracking on video")
-    parser.add_argument(
-        "--input",
-        required=True,
-        help="Name of the video file in data/inputs directory (without extension)"
-    )
+    # parser.add_argument(
+    #     "--input",
+    #     required=True,
+    #     help="Name of the video file in data/inputs directory (without extension)"
+    # )
     parser.add_argument(
         "--person_conf",
         type=float,
@@ -173,16 +173,16 @@ def parsing_argument():
         default=0.5,
         help="Confidence threshold for gender classification"
     )
-    parser.add_argument(
-        "--pure",
-        action="store_true",
-        help="Use pure deepface model without color-based heuristic (default: use color heuristic)"
-    )
-    parser.add_argument(
-        "--simple",
-        action="store_false",
-        help="Disable segmentation mask display (default: show segmentation)"
-    )
+    # parser.add_argument(
+    #     "--pure",
+    #     action="store_true",
+    #     help="Use pure deepface model without color-based heuristic (default: use color heuristic)"
+    # )
+    # parser.add_argument(
+    #     "--simple",
+    #     action="store_false",
+    #     help="Disable segmentation mask display (default: show segmentation)"
+    # )
     return parser.parse_args()
 
 
@@ -191,18 +191,46 @@ def main():
     Run person detection and tracking
     """
     args = parsing_argument()
-    video_name = args.input
+    # video_name = args.input
     person_conf = args.person_conf
     iou_threshold = args.iou
     gender_conf = args.gender_conf
-    enable_color_heuristic = not args.pure  # Invert: --pure means disable color heuristic
-    show_segmentation = not args.simple     # Invert: --simple means disable segmentation
+    # enable_color_heuristic = not args.pure  # Invert: --pure means disable color heuristic
+    # show_segmentation = not args.simple     # Invert: --simple means disable segmentation
 
     # Initialize VideoProcessor with tracking
-    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=enable_color_heuristic, show_segmentation=show_segmentation)
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=False, show_segmentation=True)
     
     # Process video
-    processor.process_video(video_name)
+    processor.process_video("01_man")
+
+
+    # Initialize VideoProcessor with tracking
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
+    
+    # Process video
+    processor.process_video("02_woman")
+
+
+    # Initialize VideoProcessor with tracking
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
+    
+    # Process video
+    processor.process_video("03_family")
+
+
+    # Initialize VideoProcessor with tracking
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
+    
+    # Process video
+    processor.process_video("04_group")
+
+
+    # Initialize VideoProcessor with tracking
+    processor = VideoProcessor(person_conf=0.2, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
+    
+    # Process video
+    processor.process_video("05_office")
 
 
 if __name__ == "__main__":

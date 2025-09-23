@@ -123,27 +123,38 @@ class GenderClassifier:
             x2 = max(0, min(x2, w))
             y2 = max(0, min(y2, h))
             
+            # Check if bounding box is valid before extraction
+            if x2 <= x1 or y2 <= y1:
+                return None
+            
             # Extract person region
             person_crop = frame[y1:y2, x1:x2]
             
-            # If mask is provided, apply it to get only the segmented person area
-            if mask is not None:
-                # Resize mask to match crop size
-                mask_resized = cv2.resize(mask, (person_crop.shape[1], person_crop.shape[0]))
-                
-                # Ensure mask is uint8 and binary
-                if mask_resized.dtype != np.uint8:
-                    mask_resized = (mask_resized * 255).astype(np.uint8)
-                
-                # Ensure mask is binary (0 or 255)
-                mask_resized = (mask_resized > 0.5).astype(np.uint8) * 255
-                
-                # Apply mask to person crop
-                person_crop = cv2.bitwise_and(person_crop, person_crop, mask=mask_resized)
-            
-            # Check if crop is valid
+            # Check if crop is valid immediately after extraction
             if person_crop.size == 0 or person_crop.shape[0] < 10 or person_crop.shape[1] < 10:
                 return None
+            
+            # If mask is provided, apply it to get only the segmented person area
+            if mask is not None and mask.size > 0:
+                try:
+                    # Ensure we have valid dimensions for resize
+                    crop_height, crop_width = person_crop.shape[:2]
+                    if crop_width > 0 and crop_height > 0:
+                        # Resize mask to match crop size
+                        mask_resized = cv2.resize(mask, (crop_width, crop_height))
+                        
+                        # Ensure mask is uint8 and binary
+                        if mask_resized.dtype != np.uint8:
+                            mask_resized = (mask_resized * 255).astype(np.uint8)
+                        
+                        # Ensure mask is binary (0 or 255)
+                        mask_resized = (mask_resized > 0.5).astype(np.uint8) * 255
+                        
+                        # Apply mask to person crop
+                        person_crop = cv2.bitwise_and(person_crop, person_crop, mask=mask_resized)
+                except Exception as mask_error:
+                    print(f"Warning: Could not apply mask to person crop: {mask_error}")
+                    # Continue without mask if mask application fails
             
             return person_crop
             

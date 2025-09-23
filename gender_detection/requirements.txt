@@ -11,6 +11,8 @@ opencv-python
 # server requirements (FastAPI + Triton)
 fastapi
 uvicorn
+uvicorn[standard]
+websockets
 python-multipart
 tritonclient[http]
 tritonclient[grpc]

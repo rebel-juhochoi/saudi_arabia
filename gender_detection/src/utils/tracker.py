@@ -21,7 +21,7 @@ class Tracker:
         self.track_history = {}
         self.frame_count = 0  # Counter for merge interval
     
-    def detect_and_track(self, frame):
+    def detect_and_track(self, frame, orig_shape):
         """
         Perform detection and tracking on a single frame
         """
@@ -29,7 +29,7 @@ class Tracker:
         self.frame_count += 1
         
         # Step 1: Detection with compiled model
-        detections = self.person_detector.infer(frame)
+        detections = self.person_detector.infer(frame, orig_shape)
         
         # Step 2: Update tracker with detections
         tracked_objects = self._update_tracker(detections, frame)
@@ -131,13 +131,15 @@ class Tracker:
         # Update track history
         self._update_track_history()
         
-        # Return tracked objects with gender information
+        # Return tracked objects with gender information (only Man and Woman)
         tracked_objects = []
         for track_id, track in self.tracks.items():
             if track['age'] < 5:  # Only return recent tracks
                 bbox = track['bbox']
                 gender = track.get('gender', 'Unknown')
-                tracked_objects.append([bbox[0], bbox[1], bbox[2], bbox[3], track_id, gender])
+                # Only include objects with determined gender (Man or Woman)
+                if gender in [0, 1, 'Man', 'Woman']:  # 0=Woman, 1=Man
+                    tracked_objects.append([bbox[0], bbox[1], bbox[2], bbox[3], track_id, gender])
         
         return tracked_objects
     
@@ -148,11 +150,18 @@ class Tracker:
         formatted_detections = []
         
         for result in detections:
-            if result.boxes is not None and result.masks is not None:
-                boxes = result.boxes.xyxy.cpu().numpy()
-                confidences = result.boxes.conf.cpu().numpy()
-                class_ids = result.boxes.cls.cpu().numpy()
-                masks = result.masks.data.cpu().numpy()
+            if result['boxes'] is not None and result['masks'] is not None:
+                # Convert torch tensors to numpy if needed
+                if hasattr(result['boxes'], 'cpu'):
+                    boxes = result['boxes'].cpu().numpy()
+                    confidences = result['conf'].cpu().numpy()
+                    class_ids = result['cls'].cpu().numpy()
+                    masks = result['masks'].cpu().numpy()
+                else:
+                    boxes = result['boxes']
+                    confidences = result['conf']
+                    class_ids = result['cls']
+                    masks = result['masks']
                 
                 for box, conf, cls_id, mask in zip(boxes, confidences, class_ids, masks):
                     if int(cls_id) == 0 and conf >= self.person_detector.conf:  # Person class
@@ -276,9 +285,9 @@ class Tracker:
                     # Update the most likely gender based on counts
                     counts = self.tracks[track_id]['gender_counts']
                     if counts['Man'] > counts['Woman']:
-                        self.tracks[track_id]['gender'] = 'Man'
+                        self.tracks[track_id]['gender'] = 1
                     elif counts['Woman'] > counts['Man']:
-                        self.tracks[track_id]['gender'] = 'Woman'
+                        self.tracks[track_id]['gender'] = 0
                     # Keep 'Unknown' if counts are equal
                     
                     return predicted_gender

@@ -20,28 +20,40 @@ class Renderer:
         annotated_frame = frame.copy()
         original_height, original_width = frame.shape[:2]
         
-        # Draw bounding boxes and track IDs
+        # Draw bounding boxes and track IDs (only for Man and Woman)
         for obj in tracked_objects:
             x1, y1, x2, y2, track_id, gender = obj
-            color = [0, 255, 0]  # Default green
-            if gender == 'Man':
-                color = [255, 0, 0]  # Blue for man
-            elif gender == 'Woman':
-                color = [203, 192, 255]  # Pink for woman
             
-            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            label = f"ID: {track_id} ({gender})"
+            # Only draw if gender is determined (Man or Woman)
+            if gender == 1 or gender == 'Man':
+                color = [255, 0, 0]  # Blue for man
+                gender_label = "Man"
+            elif gender == 0 or gender == 'Woman':
+                color = [203, 192, 255]  # Pink for woman
+                gender_label = "Woman"
+            else:
+                continue  # Skip unknown or undetermined gender
+            
+            cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 1)
+            label = f"ID: {track_id} ({gender_label})"
             cv2.putText(annotated_frame, label, (int(x1), int(y1) - 10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         
         # Draw segmentation masks from original detections (if enabled)
         if self.show_segmentation:
             for result in detections:
-                if result.boxes is not None and result.masks is not None:
-                    boxes = result.boxes.xyxy.cpu().numpy()
-                    confidences = result.boxes.conf.cpu().numpy()
-                    class_ids = result.boxes.cls.cpu().numpy()
-                    masks = result.masks.data.cpu().numpy()
+                if result['boxes'] is not None and result['masks'] is not None:
+                    # Convert torch tensors to numpy if needed
+                    if hasattr(result['boxes'], 'cpu'):
+                        boxes = result['boxes'].cpu().numpy()
+                        confidences = result['conf'].cpu().numpy()
+                        class_ids = result['cls'].cpu().numpy()
+                        masks = result['masks'].cpu().numpy()
+                    else:
+                        boxes = result['boxes']
+                        confidences = result['conf']
+                        class_ids = result['cls']
+                        masks = result['masks']
                     
                     for box, conf, class_id, mask in zip(boxes, confidences, class_ids, masks):
                         if int(class_id) == 0:  # Person class
@@ -75,9 +87,9 @@ class Renderer:
                                 if (abs(box[0] - obj_x1) < 10 and abs(box[1] - obj_y1) < 10 and 
                                     abs(box[2] - obj_x2) < 10 and abs(box[3] - obj_y2) < 10):
                                     gender = obj[5] if len(obj) > 5 else 'Unknown'
-                                    if gender == 'Man':
+                                    if gender == 1:
                                         mask_color = [255, 0, 0]  # Blue for man
-                                    elif gender == 'Woman':
+                                    elif gender == 0:
                                         mask_color = [203, 192, 255]  # Pink for woman
                                     break
                             

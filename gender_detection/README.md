@@ -1,198 +1,115 @@
-# Gender Detection System
+# Gender Detection Video Processing System
 
-A comprehensive AI-powered gender detection system built with FastAPI, Triton Inference Server, and a modern web frontend.
+A real-time video processing system that detects and tracks people with gender classification using computer vision and machine learning.
 
-## 🏗️ Architecture
+## Features
 
-The system consists of three main components:
+- **Real-time Video Processing**: Stream video with live gender detection and tracking
+- **WebSocket Streaming**: Real-time video streaming to web frontend at 25 FPS
+- **Multiple Video Configurations**: Pre-configured settings for different scenarios (man, woman, family, group, office)
+- **Interactive Web Interface**: Modern web UI with video selection and controls
+- **Segmentation Toggle**: Show/hide segmentation masks during streaming
+- **Automatic Video Looping**: Continuous playback with seamless restart
+- **FastAPI Backend**: RESTful API with WebSocket support
 
-- **Triton Server** (Port 8002): AI model inference server
-- **FastAPI Backend** (Port 8001): REST API and business logic
-- **Frontend** (Port 8000): Web interface for video processing
+## System Architecture
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.8+
-- Node.js 16+
-- UV package manager
-- CUDA-compatible GPU (recommended)
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone <your-repo-url>
-cd gender_detection
+```
+┌─────────────────┐    WebSocket     ┌─────────────────┐
+│   Web Frontend  │ ←──────────────→ │  FastAPI Server │
+│   (HTML/JS)     │    25 FPS        │   (Python)      │
+└─────────────────┘                  └─────────────────┘
+                                              │
+                                              ▼
+                                    ┌─────────────────┐
+                                    │ Video Processor │
+                                    │ - Person Det.   │
+                                    │ - Gender Class. │
+                                    │ - Object Track. │
+                                    └─────────────────┘
 ```
 
-2. Install Python dependencies:
-```bash
-uv pip install -r requirements.txt
-```
+## Quick Start
 
-3. Install Node.js dependencies:
-```bash
-cd client
-npm install
-cd ..
-```
+1. **Install Dependencies**:
+   ```bash
+   uv sync
+   ```
 
-### Running the System
+2. **Start the Server**:
+   ```bash
+   uv run start_server.py
+   ```
 
-#### Option 1: Start All Services (Recommended)
-```bash
-./scripts/start_services.sh
-```
+3. **Open Web Interface**:
+   Navigate to `http://localhost:8000`
 
-#### Option 2: Start Individual Components
+4. **Select and Stream**:
+   - Choose a video from the dropdown
+   - Toggle segmentation masks if desired
+   - Video will stream automatically with gender detection
 
-**Start Server (Triton + FastAPI):**
-```bash
-cd server
-./start.sh
-```
-
-**Start Frontend:**
-```bash
-cd client
-./start.sh
-```
-
-### Stopping the System
-
-```bash
-./scripts/stop_services.sh
-```
-
-### Monitoring
-
-```bash
-./scripts/monitor_services.sh
-```
-
-Available monitoring commands:
-- `./scripts/monitor_services.sh status` - Check service status
-- `./scripts/monitor_services.sh health` - Check health endpoints
-- `./scripts/monitor_services.sh logs` - Show recent logs
-- `./scripts/monitor_services.sh follow` - Follow logs in real-time
-- `./scripts/monitor_services.sh resources` - Show system resources
-- `./scripts/monitor_services.sh ports` - Show port usage
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 gender_detection/
-├── scripts/                    # Management scripts
-│   ├── start_services.sh      # Start all services
-│   ├── stop_services.sh       # Stop all services
-│   └── monitor_services.sh    # Monitor services
-├── server/                     # Backend services
-│   ├── start.sh               # Start server components
-│   ├── main.py                # FastAPI application
-│   ├── triton_server.py       # Triton inference server
-│   └── python_backend/        # Model implementations
-├── client/                     # Frontend
-│   ├── start.sh               # Start frontend
-│   ├── server.js              # Express server
-│   └── index.html             # Web interface
-├── src/                        # Source code
-│   ├── models/                # AI models
-│   └── utils/                 # Utility functions
-└── data/                       # Data directory
-    ├── inputs/                # Input videos
-    └── outputs/               # Processed videos
+├── src/                    # Core processing modules
+│   ├── models/            # AI model implementations
+│   └── utils/             # Utility functions
+├── frontend/              # Web interface
+│   ├── index.html         # Main web page
+│   ├── script.js          # Frontend JavaScript
+│   └── styles.css         # CSS styling
+├── data/                  # Video files and model data
+│   └── inputs/           # Input video files
+├── docs/                  # Documentation
+├── server.py             # Main FastAPI server
+├── start_server.py       # Server startup script
+└── requirements.txt      # Python dependencies
 ```
 
-## 🔧 Configuration
+## Video Configurations
 
-### Environment Variables
+The system includes pre-configured settings for different scenarios:
 
-Create a `.env` file in the project root:
+- **01_man**: Single person detection with basic settings
+- **02_woman**: Optimized for individual woman detection
+- **03_family**: Family group detection with color heuristics
+- **04_group**: Multi-person group scenarios
+- **05_office**: Office environment with lower confidence thresholds
 
-```bash
-# Server Configuration
-TRITON_PORT=8002
-FASTAPI_PORT=8001
-FRONTEND_PORT=8000
+## API Endpoints
 
-# Model Configuration
-MODEL_REPOSITORY_PATH=/path/to/models
-```
+- `GET /` - Web interface
+- `GET /health` - Server health check
+- `GET /configs` - Available video configurations
+- `WebSocket /ws/stream-video/{config_name}` - Real-time video streaming
 
-### Model Setup
+## Technologies Used
 
-1. Place your AI models in the appropriate directories
-2. Update model configurations in `server/python_backend/`
-3. Ensure models are compatible with Triton Inference Server
+- **Backend**: FastAPI, OpenCV, AsyncIO
+- **Frontend**: HTML5, JavaScript, WebSockets
+- **AI/ML**: Custom person detection and gender classification models
+- **Video Processing**: OpenCV with real-time frame processing
+- **Streaming**: WebSocket-based real-time communication
 
-## 📊 API Endpoints
+## Development
 
-### FastAPI Server (Port 8001)
+The system uses a clean, modular architecture:
 
-- `GET /` - Health check
-- `POST /process` - Process video for gender detection
-- `GET /status` - System status
+- **SimpleStreamingProcessor**: Handles video streaming and processing
+- **WebSocket Management**: Clean connection handling with automatic reconnection
+- **Thread Pool Processing**: Non-blocking AI inference
+- **Automatic Resource Management**: Efficient memory and connection cleanup
 
-### Triton Server (Port 8002)
+## Performance
 
-- `GET /v2/health/ready` - Server readiness
-- `POST /v2/models/{model_name}/infer` - Model inference
+- **Streaming Rate**: 25 FPS for smooth real-time viewing
+- **Processing**: Asynchronous frame processing with thread pools
+- **Memory Efficient**: Automatic cleanup and resource management
+- **Scalable**: WebSocket-based architecture supports multiple clients
 
-## 🐛 Troubleshooting
+---
 
-### Common Issues
-
-1. **Port conflicts**: Ensure ports 8000, 8001, and 8002 are available
-2. **Model loading errors**: Check model paths and configurations
-3. **GPU memory issues**: Reduce batch size or use CPU inference
-
-### Logs
-
-Check service logs:
-```bash
-# Triton server
-tail -f server/triton.log
-
-# FastAPI server
-tail -f server/fastapi.log
-
-# Frontend server
-tail -f client/frontend.log
-```
-
-### Health Checks
-
-```bash
-# Check all services
-curl http://localhost:8000  # Frontend
-curl http://localhost:8001  # FastAPI
-curl http://localhost:8002/v2/health/ready  # Triton
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For issues and questions:
-1. Check the troubleshooting section
-2. Review the logs
-3. Create an issue in the repository
-
-## 🔄 Updates
-
-To update the system:
-1. Pull the latest changes: `git pull`
-2. Update dependencies: `uv pip install -r requirements.txt`
-3. Restart services: `./scripts/stop_services.sh && ./scripts/start_services.sh`
+**Status**: Production Ready ✅
+**Last Updated**: September 2025

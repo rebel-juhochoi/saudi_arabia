@@ -5,7 +5,6 @@ import rebel
 import torch
 from ultralytics import YOLO
 from ultralytics.data.augment import LetterBox
-from ultralytics.engine.results import Results
 from ultralytics.utils import ops
 from ultralytics.utils.nms import non_max_suppression
 
@@ -56,8 +55,8 @@ class PersonDetector:
         frame = frame.transpose((2, 0, 1))[::-1]
         return (frame[None] / 255).astype(np.float32).copy()
     
-    def postprocess(self, preds, batch, orig_img):
-        """Postprocess raw tensor outputs to YOLO Results objects per frame"""
+    def postprocess(self, preds, batch, orig_shape):
+        """Postprocess raw tensor outputs to dictionary format per frame"""
         box_cls = torch.from_numpy(preds[0][:, : self.cfg["box_cls_dim"], :])
         masks = torch.from_numpy(preds[4])
         new_preds = [torch.cat((box_cls, masks), dim=1), tuple(torch.from_numpy(p) for p in preds[1:6])]
@@ -71,25 +70,42 @@ class PersonDetector:
             classes=self.cfg["classes"],
         )
         
-        if not isinstance(orig_img, list):
-            # orig_img is already a numpy array (frame), no need to convert
-            orig_img = [orig_img]
         proto = new_preds[1][-1] if isinstance(new_preds[1], tuple) else new_preds[1]
         results = []
-        for pred, orig in zip(p, orig_img):
+        # Handle single prediction (batch size 1)
+        for pred in p:
             if not len(pred):
-                masks = None
-            elif self.cfg["retina_masks"]:
-                pred[:, :4] = ops.scale_boxes(batch.shape[2:], pred[:, :4], orig.shape)
-                masks = ops.process_mask_native(proto[0], pred[:, 6:], pred[:, :4], orig.shape[:2])
+                # No detections
+                result_dict = {
+                    'boxes': None,
+                    'conf': None,
+                    'cls': None,
+                    'masks': None,
+                    'orig_shape': orig_shape,
+                    'names': self.cfg["names"]
+                }
             else:
-                masks = ops.process_mask(
-                    proto[0], pred[:, 6:], pred[:, :4], batch.shape[2:], upsample=True
-                )
-                pred[:, :4] = ops.scale_boxes(batch.shape[2:], pred[:, :4], orig.shape)
-            results.append(
-                Results(orig, path=None, names=self.cfg["names"], boxes=pred[:, :6], masks=masks)
-            )
+                # Process detections
+                if self.cfg["retina_masks"]:
+                    pred[:, :4] = ops.scale_boxes(batch.shape[2:], pred[:, :4], orig_shape)
+                    masks = ops.process_mask_native(proto[0], pred[:, 6:], pred[:, :4], orig_shape[:2])
+                else:
+                    masks = ops.process_mask(
+                        proto[0], pred[:, 6:], pred[:, :4], batch.shape[2:], upsample=True
+                    )
+                    pred[:, :4] = ops.scale_boxes(batch.shape[2:], pred[:, :4], orig_shape)
+                
+                # Create result dictionary with same structure as Results object
+                result_dict = {
+                    'boxes': pred[:, :4],  # xyxy coordinates
+                    'conf': pred[:, 4],    # confidence scores
+                    'cls': pred[:, 5],     # class ids
+                    'masks': masks,        # segmentation masks
+                    'orig_shape': orig_shape,
+                    'names': self.cfg["names"]
+                }
+            
+            results.append(result_dict)
         return results
     
     def detect_color(self, frame, bbox, mask):
@@ -155,8 +171,13 @@ class PersonDetector:
             print(f"Error in color detection: {e}")
             return 'unknown'
     
-    def infer(self, frame):
-        """Run complete inference pipeline: preprocess -> model.run -> postprocess"""
+    def infer(self, frame, orig_shape):
+        """Run complete inference pipeline: preprocess -> model.run -> postprocess
+        
+        Args:
+            frame: Input frame for inference
+            orig_shape: Original image shape (height, width, channels) or (height, width)
+        """
         # Preprocess
         batch = self.preprocess(frame)
         
@@ -164,6 +185,6 @@ class PersonDetector:
         preds = self.module.run(batch)
         
         # Postprocess
-        results = self.postprocess(preds, batch, frame)
+        results = self.postprocess(preds, batch, orig_shape)
         
         return results
