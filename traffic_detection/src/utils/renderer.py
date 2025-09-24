@@ -24,19 +24,11 @@ class Renderer:
         for obj in tracked_objects:
             x1, y1, x2, y2, track_id, vehicle_type = obj
             
-            # Color coding for different vehicle types
-            vehicle_colors = {
-                'car': [0, 255, 0],      # Green
-                'truck': [0, 0, 255],    # Red
-                'bus': [255, 0, 0],      # Blue
-                'bicycle': [0, 255, 255], # Yellow
-                'motorcycle': [255, 0, 255], # Magenta
-                'unknown': [128, 128, 128]   # Gray
-            }
-            color = vehicle_colors.get(vehicle_type, [128, 128, 128])
+            # Unified white color for all vehicle types
+            color = [255, 255, 255]  # White
             
             cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
-            label = f"ID: {track_id} ({vehicle_type})"
+            label = f"ID: {track_id}"
             cv2.putText(annotated_frame, label, (int(x1), int(y1) - 10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
