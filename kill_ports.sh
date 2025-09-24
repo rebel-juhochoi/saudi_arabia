@@ -1,8 +1,8 @@
 #!/bin/bash
 
-echo "🔪 Killing processes on ports 8000-8003..."
+echo "🔪 Killing processes on ports 8000-8001..."
 
-for port in 8000 8001 8002 8003; do
+for port in 8000 8001; do
     echo "🔍 Checking port $port..."
     
     # Convert port to hex for /proc/net/tcp lookup
