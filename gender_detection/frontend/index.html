@@ -54,6 +54,38 @@
             <!-- Streaming Video Display -->
             <div id="video-panel" class="video-panel" style="display: none;">
                 <h2><i class="fas fa-eye"></i> Live Gender Detection Processing</h2>
+                
+                <!-- Gender Switch Controls -->
+                <div class="gender-controls">
+                    <h3><i class="fas fa-users"></i> Gender Detection Settings</h3>
+                    <div class="gender-switches">
+                        <label class="gender-switch">
+                            <input type="checkbox" id="man-switch" checked>
+                            <span class="gender-slider man-slider"></span>
+                            <span class="gender-label">
+                                <i class="fas fa-male"></i>
+                                Man
+                            </span>
+                        </label>
+                        <label class="gender-switch">
+                            <input type="checkbox" id="woman-switch" checked>
+                            <span class="gender-slider woman-slider"></span>
+                            <span class="gender-label">
+                                <i class="fas fa-female"></i>
+                                Woman
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Alarm Display -->
+                <div class="alarm-panel">
+                    <div id="alarm-status" class="alarm-status normal">
+                        <i class="fas fa-check-circle"></i>
+                        <span id="alarm-text">System monitoring - Ready</span>
+                    </div>
+                </div>
+                
                 <div class="streaming-container">
                     <canvas id="video-canvas" width="800" height="600"></canvas>
                     <div class="streaming-info">

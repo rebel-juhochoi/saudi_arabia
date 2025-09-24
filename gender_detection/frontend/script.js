@@ -44,7 +44,11 @@ const elements = {
     segmentationToggle: document.getElementById('segmentation-toggle'),
     errorPanel: document.getElementById('error-panel'),
     errorMessage: document.getElementById('error-message'),
-    retryBtn: document.getElementById('retry-btn')
+    retryBtn: document.getElementById('retry-btn'),
+    manSwitch: document.getElementById('man-switch'),
+    womanSwitch: document.getElementById('woman-switch'),
+    alarmStatus: document.getElementById('alarm-status'),
+    alarmText: document.getElementById('alarm-text')
 };
 
 // Utility Functions
@@ -73,6 +77,92 @@ function resetUI() {
     elements.progressFill.style.width = '0%';
     elements.progressText.textContent = '0%';
     currentJobId = null;
+    resetAlarm();
+}
+
+// Alarm System Functions
+function setAlarm(type, message) {
+    elements.alarmStatus.className = `alarm-status ${type}`;
+    elements.alarmText.textContent = message;
+    
+    // Update icon based on alarm type
+    const icon = elements.alarmStatus.querySelector('i');
+    if (type === 'normal') {
+        icon.className = 'fas fa-check-circle';
+    } else if (type === 'warning') {
+        icon.className = 'fas fa-exclamation-triangle';
+    } else if (type === 'alert') {
+        icon.className = 'fas fa-exclamation-circle';
+    }
+}
+
+function resetAlarm() {
+    setAlarm('normal', 'System monitoring - Ready');
+}
+
+function checkGenderAlarm(detectedGenders) {
+    const manEnabled = elements.manSwitch.checked;
+    const womanEnabled = elements.womanSwitch.checked;
+    const currentVideo = elements.videoSelect.value;
+    
+    console.log('=== MAN VIDEO ALARM DEBUG ===');
+    console.log('Video:', currentVideo);
+    console.log('Man switch:', manEnabled);
+    console.log('Woman switch:', womanEnabled);
+    console.log('Detected genders:', detectedGenders);
+    
+    // Case 1: Both switches ON
+    if (manEnabled && womanEnabled) {
+        console.log('Both switches ON - checking if only single gender detected');
+        if (detectedGenders.length === 1) {
+            console.log('Only single gender detected - YELLOW');
+            setAlarm('warning', 'Only single gender detected');
+        } else if (detectedGenders.length === 2) {
+            console.log('Multiple genders detected - GREEN');
+            setAlarm('normal', 'System monitoring - Multiple genders detected');
+        } else {
+            console.log('No gender detected - YELLOW');
+            setAlarm('warning', 'No gender detected');
+        }
+        return;
+    }
+    
+    // Case 2: Only Man switch ON
+    if (manEnabled && !womanEnabled) {
+        console.log('Only Man switch ON - checking detected genders');
+        // Check for Woman (assuming 1 = Woman, 0 = Man) or multiple genders
+        if (detectedGenders.length === 2 || detectedGenders.includes(0)) {
+            console.log('Woman detected or multiple genders - RED ALERT');
+            setAlarm('alert', 'Different gender detected: Woman');
+        } else {
+            console.log('Only Man detected - GREEN');
+            setAlarm('normal', 'System monitoring - Man detection active');
+        }
+        return;
+    }
+    
+    // Case 3: Only Woman switch ON
+    if (womanEnabled && !manEnabled) {
+        console.log('Only Woman switch ON - checking detected genders');
+        // Check for Man (assuming 0 = Man, 1 = Woman) or multiple genders
+        if (detectedGenders.length === 2 || detectedGenders.includes(1)) {
+            console.log('Man detected or multiple genders - RED ALERT');
+            setAlarm('alert', 'Different gender detected: Man');
+        } else {
+            console.log('Only Woman detected - GREEN');
+            setAlarm('normal', 'System monitoring - Woman detection active');
+        }
+        return;
+    }
+    
+    // Case 4: No switches ON
+    if (!manEnabled && !womanEnabled) {
+        console.log('No switches ON - should show normal');
+        setAlarm('normal', 'System monitoring - No gender detection active');
+        return;
+    }
+    
+    console.log('=== END DEBUG ===');
 }
 
 // API Functions
@@ -243,6 +333,11 @@ function handleStreamMessage(data) {
             const trackText = data.active_tracks > 0 ? ` (${data.active_tracks} tracks)` : '';
             elements.streamStatus.textContent = `Streaming live video${trackText}`;
             elements.streamStatus.className = 'stream-status processing';
+            
+            // Check for gender alarm if gender data is available
+            if (data.detected_genders) {
+                checkGenderAlarm(data.detected_genders);
+            }
             break;
             
         case 'complete':
@@ -337,6 +432,23 @@ function sendSegmentationToggle(enabled) {
             value: enabled
         }));
         console.log(`Segmentation ${enabled ? 'enabled' : 'disabled'}`);
+    }
+}
+
+function sendGenderSwitchUpdate() {
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const manEnabled = elements.manSwitch.checked;
+        const womanEnabled = elements.womanSwitch.checked;
+        
+        websocket.send(JSON.stringify({
+            type: 'control',
+            command: 'update_gender_switches',
+            value: {
+                man_enabled: manEnabled,
+                woman_enabled: womanEnabled
+            }
+        }));
+        console.log(`Gender switches updated - Man: ${manEnabled}, Woman: ${womanEnabled}`);
     }
 }
 
@@ -476,6 +588,15 @@ function setupEventListeners() {
     elements.segmentationToggle.addEventListener('change', (e) => {
         const enabled = e.target.checked;
         sendSegmentationToggle(enabled);
+    });
+    
+    // Gender switches
+    elements.manSwitch.addEventListener('change', (e) => {
+        sendGenderSwitchUpdate();
+    });
+    
+    elements.womanSwitch.addEventListener('change', (e) => {
+        sendGenderSwitchUpdate();
     });
     
     // Retry button

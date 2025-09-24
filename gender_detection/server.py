@@ -131,6 +131,8 @@ class SimpleStreamingProcessor(VideoProcessor):
         self.is_streaming = False
         self.show_segmentation = kwargs.get('show_segmentation', False)
         self.streaming_speed = 1.0  # Normal speed
+        self.man_enabled = True  # Default both enabled
+        self.woman_enabled = True
         
     async def stream_video(self, video_path: str, websocket: WebSocket):
         """Main streaming method - simple and clean"""
@@ -181,12 +183,13 @@ class SimpleStreamingProcessor(VideoProcessor):
                 # Process frame if past skip period
                 if frame_count > frames_to_skip:
                     # Run inference in thread pool to avoid blocking
-                    processed_frame, active_tracks = await loop.run_in_executor(
+                    processed_frame, active_tracks, detected_genders = await loop.run_in_executor(
                         None, self._process_frame_safe, frame, frame_count, frames_to_skip
                     )
                 else:
                     processed_frame = frame
                     active_tracks = 0
+                    detected_genders = []
                 
                 # Encode frame to base64
                 encoded_frame = await loop.run_in_executor(
@@ -200,7 +203,8 @@ class SimpleStreamingProcessor(VideoProcessor):
                         "frame": encoded_frame,
                         "frame_count": frame_count,
                         "active_tracks": active_tracks,
-                        "segmentation": self.show_segmentation
+                        "segmentation": self.show_segmentation,
+                        "detected_genders": detected_genders
                     }
                     
                     await websocket.send_text(json.dumps(message))
@@ -225,10 +229,15 @@ class SimpleStreamingProcessor(VideoProcessor):
                 self.renderer.show_segmentation = self.show_segmentation
             
             # Process frame
-            return self.process_frame(frame, frame_count, frames_to_skip)
+            processed_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+            
+            # Extract detected genders from tracked objects
+            detected_genders = self._extract_detected_genders()
+            
+            return processed_frame, active_tracks, detected_genders
         except Exception as e:
             print(f"Frame processing error: {e}")
-            return frame, 0
+            return frame, 0, []
     
     def _encode_frame(self, frame):
         """Encode frame to base64"""
@@ -254,6 +263,24 @@ class SimpleStreamingProcessor(VideoProcessor):
         """Toggle segmentation display"""
         self.show_segmentation = enabled
         print(f"Segmentation {'enabled' if enabled else 'disabled'}")
+    
+    def _extract_detected_genders(self):
+        """Extract unique detected genders from current tracked objects"""
+        if not hasattr(self, 'tracker') or not self.tracker:
+            return []
+        
+        detected_genders = set()
+        for track_id, track_data in self.tracker.tracks.items():
+            if 'gender' in track_data and track_data['gender'] != 'Unknown':
+                detected_genders.add(track_data['gender'])
+        
+        return list(detected_genders)
+    
+    def update_gender_switches(self, man_enabled: bool, woman_enabled: bool):
+        """Update gender switch settings"""
+        self.man_enabled = man_enabled
+        self.woman_enabled = woman_enabled
+        print(f"Gender switches updated - Man: {man_enabled}, Woman: {woman_enabled}")
 
 
 class CustomVideoProcessor(VideoProcessor):
@@ -734,6 +761,16 @@ async def handle_stream_controls(websocket: WebSocket, processor: SimpleStreamin
                         await websocket.send_text(json.dumps({
                             "type": "control_response", 
                             "message": f"Segmentation {'enabled' if enabled else 'disabled'}"
+                        }))
+                        
+                    elif command == "update_gender_switches":
+                        switch_data = data.get("value", {})
+                        man_enabled = bool(switch_data.get("man_enabled", True))
+                        woman_enabled = bool(switch_data.get("woman_enabled", True))
+                        processor.update_gender_switches(man_enabled, woman_enabled)
+                        await websocket.send_text(json.dumps({
+                            "type": "control_response", 
+                            "message": f"Gender switches updated - Man: {man_enabled}, Woman: {woman_enabled}"
                         }))
                         
             except asyncio.TimeoutError:

@@ -274,6 +274,181 @@ main {
     margin-bottom: 20px;
 }
 
+/* Gender Controls */
+.gender-controls {
+    margin-bottom: 20px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.gender-controls h3 {
+    margin-bottom: 15px;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gender-switches {
+    display: flex;
+    gap: 30px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.gender-switch {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    gap: 15px;
+}
+
+.gender-switch input[type="checkbox"] {
+    display: none;
+}
+
+.gender-slider {
+    position: relative;
+    width: 70px;
+    height: 35px;
+    border-radius: 35px;
+    transition: all 0.3s ease;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.gender-slider::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 27px;
+    height: 27px;
+    background: white;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.man-slider {
+    background: #e3f2fd;
+    border: 2px solid #2196f3;
+}
+
+.woman-slider {
+    background: #fce4ec;
+    border: 2px solid #e91e63;
+}
+
+.gender-switch input[type="checkbox"]:checked + .man-slider {
+    background: #2196f3;
+    border-color: #1976d2;
+}
+
+.gender-switch input[type="checkbox"]:checked + .woman-slider {
+    background: #e91e63;
+    border-color: #c2185b;
+}
+
+.gender-switch input[type="checkbox"]:checked + .gender-slider::before {
+    transform: translateX(35px);
+}
+
+.gender-label {
+    font-weight: 600;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1.1rem;
+}
+
+.gender-switch input[type="checkbox"]:checked + .gender-slider + .gender-label {
+    color: #667eea;
+}
+
+.gender-switch input[type="checkbox"]:checked + .man-slider + .gender-label {
+    color: #2196f3;
+}
+
+.gender-switch input[type="checkbox"]:checked + .woman-slider + .gender-label {
+    color: #e91e63;
+}
+
+.gender-switch:hover .gender-slider {
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+/* Alarm Panel */
+.alarm-panel {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.alarm-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+}
+
+.alarm-status.normal {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alarm-status.warning {
+    background-color: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeaa7;
+    animation: pulse-warning 2s infinite;
+}
+
+.alarm-status.alert {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    animation: pulse-alert 1s infinite;
+}
+
+.alarm-status i {
+    font-size: 1.2rem;
+}
+
+.alarm-status.normal i {
+    color: #28a745;
+}
+
+.alarm-status.warning i {
+    color: #ffc107;
+}
+
+.alarm-status.alert i {
+    color: #dc3545;
+}
+
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes pulse-alert {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
 /* Streaming Controls */
 .streaming-controls {
     margin-bottom: 20px;
