@@ -50,7 +50,7 @@ echo "✅ Port cleanup completed!"
 
 # Verify ports are free
 echo "🔍 Verifying ports are free..."
-for port in 8000 8001 8002 8003; do
+for port in 8000 8001; do
     if python3 -c "import socket; s=socket.socket(); s.bind(('localhost', $port)); s.close()" 2>/dev/null; then
         echo "✅ Port $port is free"
     else
