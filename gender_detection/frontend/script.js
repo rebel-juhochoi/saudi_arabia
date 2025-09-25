@@ -19,11 +19,10 @@ let isDisplaying = false;
 
 // Video mapping - maps display names to config names and file paths
 const VIDEO_MAPPING = {
-    'Man': { config: '01_man', file: 'inputs/01_man.mp4' },
-    'Woman': { config: '02_woman', file: 'inputs/02_woman.mp4' },
-    'Family': { config: '03_family', file: 'inputs/03_family.mp4' },
-    'Group': { config: '04_group', file: 'inputs/04_group.mp4' },
-    'Office': { config: '05_office', file: 'inputs/05_office.mp4' }
+    '01': { config: '01', file: 'inputs/01.mp4' },
+    '02': { config: '02', file: 'inputs/02.mp4' },
+    '03': { config: '03', file: 'inputs/03.mp4' },
+    '04': { config: '04', file: 'inputs/04.mp4' }
 };
 
 // DOM Elements

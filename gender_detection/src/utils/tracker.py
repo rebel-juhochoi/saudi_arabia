@@ -15,11 +15,26 @@ class Tracker:
         self.iou_threshold = iou_threshold
         self.enable_color_heuristic = enable_color_heuristic
         
-        # Track data structure: {track_id: {'bbox': [x1,y1,x2,y2], 'conf': conf, 'age': age, 'last_seen': frame, 'gender_counts': {'Man': 0, 'Woman': 0}, 'gender': 'Unknown', 'color_counts': {'black': 0, 'white': 0}, 'dominant_color': 'Unknown'}}
+        # Track data structure: {track_id: {'bbox': [x1,y1,x2,y2], 'conf': conf, 'age': age, 'last_seen': frame, 'gender_counts': {'Man': 0, 'Woman': 0}, 'gender': 'Unknown', 'color_percentages': {'black': 0.0, 'white': 0.0, 'red': 0.0, 'brown': 0.0, 'pink': 0.0, 'blue': 0.0, 'green': 0.0, 'yellow': 0.0, 'orange': 0.0, 'purple': 0.0, 'gray': 0.0}, 'top_colors': []}}
+        # Color heuristic: Priority 1 = black OR pink in top 2 → Woman, Priority 2 = white OR red in top 2 → Man, else → Woman
         self.tracks = {}
         self.next_track_id = 1
         self.track_history = {}
         self.frame_count = 0  # Counter for merge interval
+    
+    def _update_top_colors(self, track_id):
+        """
+        Update the top 2 colors for a track based on color percentages
+        """
+        percentages = self.tracks[track_id]['color_percentages']
+        
+        # Sort colors by percentage (descending)
+        sorted_colors = sorted(percentages.items(), key=lambda x: x[1], reverse=True)
+        
+        # Get top 2 colors
+        top_colors = [color for color, percentage in sorted_colors[:2] if percentage > 0]
+        
+        self.tracks[track_id]['top_colors'] = top_colors
     
     def detect_and_track(self, frame, orig_shape):
         """
@@ -71,18 +86,18 @@ class Tracker:
                 self.tracks[track_id]['mask'] = detection[6]
             
             # Update color information if available
-            if len(detection) > 7:  # If color is available
-                dominant_color = detection[7]
-                if dominant_color in self.tracks[track_id]['color_counts']:
-                    self.tracks[track_id]['color_counts'][dominant_color] += 1
-                
-                # Update dominant color based on counts
-                counts = self.tracks[track_id]['color_counts']
-                if counts['black'] > counts['white']:
-                    self.tracks[track_id]['dominant_color'] = 'black'
-                elif counts['white'] > counts['black']:
-                    self.tracks[track_id]['dominant_color'] = 'white'
-                # Keep 'Unknown' if counts are equal
+            if len(detection) > 7:  # If color percentages are available
+                color_percentages = detection[7]
+                if isinstance(color_percentages, dict):
+                    # Update color percentages (average with previous values)
+                    for color, percentage in color_percentages.items():
+                        if color in self.tracks[track_id]['color_percentages']:
+                            # Simple moving average (could be improved with weighted average)
+                            current = self.tracks[track_id]['color_percentages'][color]
+                            self.tracks[track_id]['color_percentages'][color] = (current + percentage) / 2
+                    
+                    # Update top colors ranking
+                    self._update_top_colors(track_id)
             
             # Perform gender classification for matched tracks
             self._classify_gender_for_track(track_id, frame)
@@ -98,25 +113,25 @@ class Tracker:
                 'last_seen': 0,
                 'gender_counts': {'Man': 0, 'Woman': 0},
                 'gender': 'Unknown',
-                'color_counts': {'black': 0, 'white': 0},
-                'dominant_color': 'Unknown'
+                'color_percentages': {'black': 0.0, 'white': 0.0, 'red': 0.0, 'brown': 0.0, 'pink': 0.0, 'blue': 0.0, 'green': 0.0, 'yellow': 0.0, 'orange': 0.0, 'purple': 0.0, 'gray': 0.0},
+                'top_colors': []
             }
             if len(detection) > 6:  # If mask is available
                 self.tracks[track_id]['mask'] = detection[6]
             
             # Update color information if available
-            if len(detection) > 7:  # If color is available
-                dominant_color = detection[7]
-                if dominant_color in self.tracks[track_id]['color_counts']:
-                    self.tracks[track_id]['color_counts'][dominant_color] += 1
-                
-                # Update dominant color based on counts
-                counts = self.tracks[track_id]['color_counts']
-                if counts['black'] > counts['white']:
-                    self.tracks[track_id]['dominant_color'] = 'black'
-                elif counts['white'] > counts['black']:
-                    self.tracks[track_id]['dominant_color'] = 'white'
-                # Keep 'Unknown' if counts are equal
+            if len(detection) > 7:  # If color percentages are available
+                color_percentages = detection[7]
+                if isinstance(color_percentages, dict):
+                    # Update color percentages (average with previous values)
+                    for color, percentage in color_percentages.items():
+                        if color in self.tracks[track_id]['color_percentages']:
+                            # Simple moving average (could be improved with weighted average)
+                            current = self.tracks[track_id]['color_percentages'][color]
+                            self.tracks[track_id]['color_percentages'][color] = (current + percentage) / 2
+                    
+                    # Update top colors ranking
+                    self._update_top_colors(track_id)
             
             # Perform gender classification for new tracks
             self._classify_gender_for_track(track_id, frame)
@@ -169,10 +184,10 @@ class Tracker:
                         
                         # Add color detection if enabled
                         if self.enable_color_heuristic and frame is not None:
-                            dominant_color = self.person_detector.detect_color(frame, box, mask)
-                            detection.append(dominant_color)
+                            color_percentages = self.person_detector.detect_color(frame, box, mask)
+                            detection.append(color_percentages)
                         else:
-                            detection.append('unknown')
+                            detection.append({'unknown': 1.0})
                         
                         formatted_detections.append(detection)
         
@@ -256,24 +271,23 @@ class Tracker:
                 # Check if confidence meets the threshold
                 if confidence >= self.gender_classifier.conf_threshold:
                     if self.enable_color_heuristic:
-                        # Color heuristic mode: override deepface with color-based logic
-                        dominant_color = self.tracks[track_id].get('dominant_color', 'unknown')
+                        # Color heuristic mode: top 2 colors analysis
+                        top_colors = self.tracks[track_id].get('top_colors', [])
                         
-                        if dominant_color == 'black':
-                            # Black clothing heuristic: increment woman count
+                        # Priority check: If black OR pink is in top 2, classify as woman (overrides other logic)
+                        if 'black' in top_colors or 'pink' in top_colors:
+                            # Black or pink in top 2: increment woman count (overrides white/red logic)
                             self.tracks[track_id]['gender_counts']['Woman'] += 1
                             predicted_gender = 'Woman'
-                        elif dominant_color == 'white':
-                            # White clothing heuristic: increment man count
+                        # Secondary check: Male condition: white OR red (or both) in top 2 colors
+                        elif 'white' in top_colors or 'red' in top_colors:
+                            # Either white or red (or both) in top 2: increment man count
                             self.tracks[track_id]['gender_counts']['Man'] += 1
                             predicted_gender = 'Man'
                         else:
-                            # If color is unknown, use deepface prediction
-                            if gender in self.tracks[track_id]['gender_counts']:
-                                self.tracks[track_id]['gender_counts'][gender] += 1
-                                predicted_gender = gender
-                            else:
-                                predicted_gender = None
+                            # Neither black, white, nor red in top 2: default to female
+                            self.tracks[track_id]['gender_counts']['Woman'] += 1
+                            predicted_gender = 'Woman'
                     else:
                         # Normal mode: use deepface only
                         if gender in self.tracks[track_id]['gender_counts']:

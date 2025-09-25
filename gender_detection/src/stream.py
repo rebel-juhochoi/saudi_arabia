@@ -48,13 +48,13 @@ class VideoStreamProcessor:
         project_root = Path(__file__).parent.parent
         
         # Video numbers to load
-        video_numbers = ["01", "02", "03", "04", "05"]
+        video_numbers = ["01", "02", "03", "04"]
         
         for video_num in video_numbers:
-            input_path = project_root / "data" / "inputs" / f"{video_num}_*.mp4"
+            input_path = project_root / "data" / "inputs" / f"{video_num}.mp4"
             
             # Find the actual video file (since we don't know the exact name after the number)
-            video_files = list(project_root.glob(f"data/inputs/{video_num}_*.mp4"))
+            video_files = list(project_root.glob(f"data/inputs/{video_num}.mp4"))
             
             if not video_files:
                 print(f"Warning: No video found for number {video_num}")

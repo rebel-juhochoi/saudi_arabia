@@ -110,13 +110,13 @@ class PersonDetector:
     
     def detect_color(self, frame, bbox, mask):
         """
-        Detect the most dominant color (black or white) in the segmentation area
+        Detect color percentages in the segmentation area, excluding skin color
         Args:
             frame: Original frame
             bbox: Bounding box [x1, y1, x2, y2]
             mask: Segmentation mask
         Returns:
-            'black' or 'white' based on dominant color
+            Dictionary with color percentages: {'white': 0.3, 'red': 0.2, 'black': 0.5, ...}
         """
         try:
             x1, y1, x2, y2 = map(int, bbox)
@@ -132,7 +132,7 @@ class PersonDetector:
             person_crop = frame[y1:y2, x1:x2]
             
             if person_crop.size == 0:
-                return 'unknown'
+                return {'unknown': 1.0}
             
             # Resize mask to match crop size
             mask_resized = cv2.resize(mask, (person_crop.shape[1], person_crop.shape[0]))
@@ -146,30 +146,252 @@ class PersonDetector:
             # Apply mask to get only the segmented person area
             person_masked = cv2.bitwise_and(person_crop, person_crop, mask=mask_binary)
             
-            # Convert to grayscale for color analysis
-            gray = cv2.cvtColor(person_masked, cv2.COLOR_BGR2GRAY)
-            
             # Get only the masked pixels
-            masked_pixels = gray[mask_binary == 1]
+            masked_pixels = person_masked[mask_binary == 1]
             
             if len(masked_pixels) == 0:
-                return 'unknown'
+                return {'unknown': 1.0}
             
-            # Calculate mean brightness
-            mean_brightness = np.mean(masked_pixels)
+            # Convert to HSV for better color analysis
+            hsv = cv2.cvtColor(person_masked, cv2.COLOR_BGR2HSV)
+            masked_hsv = hsv[mask_binary == 1]
             
-            # Threshold to determine if it's more black or white
-            # Values closer to 0 are black, closer to 255 are white
-            threshold = 127  # Middle point
+            if len(masked_hsv) == 0:
+                return {'unknown': 1.0}
             
-            if mean_brightness < threshold:
-                return 'black'
-            else:
-                return 'white'
+            # Detect skin color and create exclusion mask
+            skin_mask = self._detect_skin_color(masked_hsv)
+            
+            # Exclude skin pixels from clothing analysis
+            clothing_hsv = masked_hsv[~skin_mask]
+            
+            if len(clothing_hsv) == 0:
+                return {'unknown': 1.0}
+            
+            # Calculate color percentages for clothing only
+            color_percentages = self._calculate_color_percentages(clothing_hsv)
+            
+            return color_percentages
                 
         except Exception as e:
             print(f"Error in color detection: {e}")
-            return 'unknown'
+            return {'unknown': 1.0}
+    
+    def _classify_color_hsv(self, mean_hue, mean_saturation, mean_brightness, median_hue, has_pattern):
+        """
+        Classify color based on HSV values
+        """
+        # Black: low brightness, low saturation
+        if mean_brightness < 50 and mean_saturation < 30:
+            return 'black'
+        
+        # White: high brightness, low saturation
+        elif mean_brightness > 200 and mean_saturation < 30:
+            return 'white'
+        
+        # Gray: medium brightness, low saturation
+        elif 50 <= mean_brightness <= 200 and mean_saturation < 30:
+            return 'gray'
+        
+        # Red: hue around 0 or 179 (red range)
+        elif (0 <= mean_hue <= 10 or 170 <= mean_hue <= 179) and mean_saturation > 50:
+            # Check for patterns in red
+            if has_pattern and mean_brightness > 150:
+                return 'red_pattern'  # Red with stripes/checks
+            return 'red'
+        
+        # Pink: red hue with high brightness and medium saturation
+        elif (0 <= mean_hue <= 10 or 170 <= mean_hue <= 179) and mean_saturation > 30 and mean_brightness > 150:
+            return 'pink'
+        
+        # Brown: red-orange hue with low brightness and medium saturation
+        elif (10 <= mean_hue <= 25) and mean_saturation > 40 and mean_brightness < 120:
+            return 'brown'
+        
+        # Orange: hue around 15-25
+        elif 15 <= mean_hue <= 25 and mean_saturation > 50:
+            return 'orange'
+        
+        # Yellow: hue around 25-35
+        elif 25 <= mean_hue <= 35 and mean_saturation > 50:
+            return 'yellow'
+        
+        # Green: hue around 35-85
+        elif 35 <= mean_hue <= 85 and mean_saturation > 50:
+            return 'green'
+        
+        # Blue: hue around 85-130
+        elif 85 <= mean_hue <= 130 and mean_saturation > 50:
+            return 'blue'
+        
+        # Purple: hue around 130-170
+        elif 130 <= mean_hue <= 170 and mean_saturation > 50:
+            return 'purple'
+        
+        # Check for white patterns
+        elif mean_brightness > 180 and mean_saturation < 40 and has_pattern:
+            return 'white_pattern'  # White with stripes/checks
+        
+        # Default to unknown if no clear classification
+        return 'unknown'
+    
+    def _detect_pattern(self, person_masked, mask_binary):
+        """
+        Detect stripes or check patterns in the clothing
+        """
+        try:
+            # Convert to grayscale for pattern detection
+            gray = cv2.cvtColor(person_masked, cv2.COLOR_BGR2GRAY)
+            masked_gray = gray[mask_binary == 1]
+            
+            if len(masked_gray) == 0:
+                return False
+            
+            # Reshape to 2D for analysis
+            h, w = person_masked.shape[:2]
+            masked_2d = masked_gray.reshape(-1, 1)
+            
+            # Simple pattern detection using edge detection
+            edges = cv2.Canny(gray, 50, 150)
+            masked_edges = edges[mask_binary == 1]
+            
+            # Count edge pixels
+            edge_ratio = np.sum(masked_edges > 0) / len(masked_edges) if len(masked_edges) > 0 else 0
+            
+            # Pattern threshold - adjust based on testing
+            pattern_threshold = 0.1  # 10% of pixels are edges
+            
+            return edge_ratio > pattern_threshold
+            
+        except Exception as e:
+            print(f"Error in pattern detection: {e}")
+            return False
+    
+    def _detect_skin_color(self, hsv_pixels):
+        """
+        Detect skin color pixels in HSV space
+        Args:
+            hsv_pixels: Array of HSV pixel values
+        Returns:
+            Boolean mask where True indicates skin pixels
+        """
+        try:
+            h_values = hsv_pixels[:, 0]  # Hue
+            s_values = hsv_pixels[:, 1]  # Saturation
+            v_values = hsv_pixels[:, 2]  # Value
+            
+            # Skin color ranges in HSV
+            # Hue: 0-20 (red-orange) and 160-179 (red-purple)
+            # Saturation: 20-255 (not too desaturated)
+            # Value: 20-255 (not too dark)
+            
+            skin_mask = (
+                ((h_values >= 0) & (h_values <= 20)) | 
+                ((h_values >= 160) & (h_values <= 179))
+            ) & (
+                (s_values >= 20) & (s_values <= 255)
+            ) & (
+                (v_values >= 20) & (v_values <= 255)
+            )
+            
+            return skin_mask
+            
+        except Exception as e:
+            print(f"Error in skin detection: {e}")
+            return np.zeros(len(hsv_pixels), dtype=bool)
+    
+    def _calculate_color_percentages(self, hsv_pixels):
+        """
+        Calculate percentage of each color in the clothing pixels
+        Args:
+            hsv_pixels: Array of HSV pixel values (clothing only, no skin)
+        Returns:
+            Dictionary with color percentages
+        """
+        try:
+            h_values = hsv_pixels[:, 0]  # Hue
+            s_values = hsv_pixels[:, 1]  # Saturation
+            v_values = hsv_pixels[:, 2]  # Value
+            
+            total_pixels = len(hsv_pixels)
+            color_counts = {
+                'white': 0, 'black': 0, 'red': 0, 'brown': 0, 'pink': 0,
+                'blue': 0, 'green': 0, 'yellow': 0, 'orange': 0, 'purple': 0, 'gray': 0
+            }
+            
+            for i in range(total_pixels):
+                h, s, v = h_values[i], s_values[i], v_values[i]
+                
+                # Classify each pixel
+                color = self._classify_single_pixel_hsv(h, s, v)
+                if color in color_counts:
+                    color_counts[color] += 1
+            
+            # Convert counts to percentages
+            color_percentages = {}
+            for color, count in color_counts.items():
+                color_percentages[color] = count / total_pixels if total_pixels > 0 else 0
+            
+            return color_percentages
+            
+        except Exception as e:
+            print(f"Error in color percentage calculation: {e}")
+            return {'unknown': 1.0}
+    
+    def _classify_single_pixel_hsv(self, h, s, v):
+        """
+        Classify a single pixel based on HSV values
+        Args:
+            h, s, v: Hue, Saturation, Value of a single pixel
+        Returns:
+            Color category string
+        """
+        # Black: low brightness, low saturation
+        if v < 50 and s < 30:
+            return 'black'
+        
+        # White: high brightness, low saturation
+        elif v > 200 and s < 30:
+            return 'white'
+        
+        # Gray: medium brightness, low saturation
+        elif 50 <= v <= 200 and s < 30:
+            return 'gray'
+        
+        # Red: hue around 0 or 179 (red range)
+        elif (0 <= h <= 10 or 170 <= h <= 179) and s > 50:
+            return 'red'
+        
+        # Pink: red hue with high brightness and medium saturation
+        elif (0 <= h <= 10 or 170 <= h <= 179) and s > 30 and v > 150:
+            return 'pink'
+        
+        # Brown: red-orange hue with low brightness and medium saturation
+        elif (10 <= h <= 25) and s > 40 and v < 120:
+            return 'brown'
+        
+        # Orange: hue around 15-25
+        elif 15 <= h <= 25 and s > 50:
+            return 'orange'
+        
+        # Yellow: hue around 25-35
+        elif 25 <= h <= 35 and s > 50:
+            return 'yellow'
+        
+        # Green: hue around 35-85
+        elif 35 <= h <= 85 and s > 50:
+            return 'green'
+        
+        # Blue: hue around 85-130
+        elif 85 <= h <= 130 and s > 50:
+            return 'blue'
+        
+        # Purple: hue around 130-170
+        elif 130 <= h <= 170 and s > 50:
+            return 'purple'
+        
+        # Default to unknown
+        return 'unknown'
     
     def infer(self, frame, orig_shape):
         """Run complete inference pipeline: preprocess -> model.run -> postprocess

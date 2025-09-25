@@ -199,38 +199,31 @@ def main():
     # show_segmentation = not args.simple     # Invert: --simple means disable segmentation
 
     # Initialize VideoProcessor with tracking
-    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=False, show_segmentation=True)
+    processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
     
     # Process video
-    processor.process_video("01_man")
+    processor.process_video("01")
 
 
     # Initialize VideoProcessor with tracking
     processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
     
     # Process video
-    processor.process_video("02_woman")
+    processor.process_video("02")
 
 
     # Initialize VideoProcessor with tracking
     processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
     
     # Process video
-    processor.process_video("03_family")
+    processor.process_video("03")
 
 
     # Initialize VideoProcessor with tracking
     processor = VideoProcessor(person_conf=person_conf, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
     
     # Process video
-    processor.process_video("04_group")
-
-
-    # Initialize VideoProcessor with tracking
-    processor = VideoProcessor(person_conf=0.2, iou_threshold=iou_threshold, gender_conf=gender_conf, enable_color_heuristic=True, show_segmentation=True)
-    
-    # Process video
-    processor.process_video("05_office")
+    processor.process_video("04")
 
 
 if __name__ == "__main__":

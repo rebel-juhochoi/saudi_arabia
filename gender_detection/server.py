@@ -62,40 +62,33 @@ processing_status: Dict[str, Dict[str, Any]] = {}
 
 # Video processor configurations matching the original process.py
 PROCESSOR_CONFIGS = {
-    "01_man": {
-        "person_conf": 0.25,
-        "iou_threshold": 0.5,
-        "gender_conf": 0.5,
-        "enable_color_heuristic": False,
-        "show_segmentation": False
-    },
-    "02_woman": {
+    "01": {
         "person_conf": 0.25,
         "iou_threshold": 0.5,
         "gender_conf": 0.5,
         "enable_color_heuristic": True,
-        "show_segmentation": False
+        "show_segmentation": True
     },
-    "03_family": {
+    "02": {
         "person_conf": 0.25,
         "iou_threshold": 0.5,
         "gender_conf": 0.5,
         "enable_color_heuristic": True,
-        "show_segmentation": False
+        "show_segmentation": True
     },
-    "04_group": {
+    "03": {
         "person_conf": 0.25,
         "iou_threshold": 0.5,
         "gender_conf": 0.5,
         "enable_color_heuristic": True,
-        "show_segmentation": False
+        "show_segmentation": True
     },
-    "05_office": {
-        "person_conf": 0.2,  # Lower confidence for office scenario
+    "04": {
+        "person_conf": 0.25,
         "iou_threshold": 0.5,
         "gender_conf": 0.5,
         "enable_color_heuristic": True,
-        "show_segmentation": False
+        "show_segmentation": True
     }
 }
 
@@ -663,11 +656,10 @@ async def websocket_stream_video(websocket: WebSocket, config_name: str):
     
     # Video file mapping
     video_mapping = {
-        '01_man': 'inputs/01_man.mp4',
-        '02_woman': 'inputs/02_woman.mp4',
-        '03_family': 'inputs/03_family.mp4',
-        '04_group': 'inputs/04_group.mp4',
-        '05_office': 'inputs/05_office.mp4'
+        '01': 'inputs/01.mp4',
+        '02': 'inputs/02.mp4',
+        '03': 'inputs/03.mp4',
+        '04': 'inputs/04.mp4'
     }
     
     if config_name not in video_mapping:
