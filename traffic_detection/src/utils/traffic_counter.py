@@ -12,21 +12,26 @@ class TrafficCounter:
     Traffic counter for cumulative vehicle counting in road areas
     """
     
-    def __init__(self, counting_line_position=0.85, min_track_history=5):
+    def __init__(self, counting_line_position=0.80, min_track_history=3, count_display_delay=7):
         """
         Initialize traffic counter
         Args:
             counting_line_position: Y-position of the counting line as a ratio of frame height (0.0 to 1.0)
             min_track_history: Minimum number of frames a track must exist before being considered for counting
+            count_display_delay: Delay in seconds before count is displayed (for visual synchronization)
         """
         self.counting_line_position = counting_line_position
         self.min_track_history = min_track_history
+        self.count_display_delay = count_display_delay
         self.road_counts: Dict[int, Dict] = {}
         self.counting_lines: Dict[int, Tuple[int, int, int, int]] = {}
         self.track_histories: Dict[int, Dict] = {} # Stores positions and status for each track_id
         self.frame_count = 0
         self.start_time = time.time()
         self.total_vehicles_seen = 0
+        
+        # Pending counts for delayed display
+        self.pending_counts: Dict[int, Dict] = {}  # track_id -> {'count_time': timestamp, 'vehicle_type': str}
 
         # Direction detection
         self.direction_sensitivity = 10  # pixels minimum movement to determine direction
@@ -34,6 +39,11 @@ class TrafficCounter:
         # Simple bottom line counting
         self.frame_height = None
         self.frame_width = None
+        
+        # Counting zone parameters for more robust detection
+        self.counting_zone_height = 20  # Height of counting zone in pixels
+        self.min_downward_movement = 5  # Minimum downward movement to count
+        self.min_track_duration = 0.2  # Minimum track duration in seconds
         
     def initialize_road_areas(self, road_masks: List[np.ndarray]):
         """
@@ -103,12 +113,12 @@ class TrafficCounter:
         # Set frame dimensions and counting line on first call
         if self.frame_height is None:
             self.frame_height, self.frame_width = frame_shape
-            # Create horizontal counting line at 90% of frame height (near bottom)
-            # Start line at 1/5 from left edge to avoid parked cars
-            line_y = int(self.frame_height * 0.90)
-            line_start_x = int(self.frame_width * 0.2)  # Start at 1/5 from left
+            # Create horizontal counting line at bottom of frame
+            # Start line at 20% from left edge to avoid parked cars
+            line_y = int(self.frame_height * 0.90)  # 90% down from top (near bottom)
+            line_start_x = int(self.frame_width * 0.20)  # Start at 20% from left
             self.counting_lines[0] = (line_start_x, line_y, self.frame_width, line_y)
-            print(f"Created counting line at y={line_y} from x={line_start_x} to x={self.frame_width} (90% height, avoiding left 20%)")
+            print(f"📍 Counting line created: y={line_y} (90% of {self.frame_height}), x={line_start_x}-{self.frame_width} (20%-100% of {self.frame_width})")
         
         # Update existing tracks and add new ones
         current_track_ids = set()
@@ -144,6 +154,9 @@ class TrafficCounter:
         
         # Clean up old tracks
         self._cleanup_old_tracks(current_track_ids, current_time)
+        
+        # Process pending counts for delayed display
+        self._process_pending_counts()
     
     def _get_road_id_for_position(self, x: float, y: float) -> Optional[int]:
         """
@@ -205,7 +218,7 @@ class TrafficCounter:
     
     def _should_count_vehicle_simple(self, track_id: int) -> bool:
         """
-        Simple counting logic: check if vehicle touches the bottom line
+        Robust counting logic: check if vehicle has crossed the bottom line with proper validation
         
         Args:
             track_id: ID of the track
@@ -216,7 +229,7 @@ class TrafficCounter:
         track = self.track_histories[track_id]
         positions = list(track['positions'])
         
-        if len(positions) < 1:
+        if len(positions) < 3:  # Need at least 3 positions for robust crossing detection
             return False
         
         # Get counting line coordinates
@@ -225,12 +238,109 @@ class TrafficCounter:
         
         line_start_x, line_y, line_end_x, _ = self.counting_lines[0]
         
-        # Check if vehicle's right bottom corner is within counting line area
-        current_x, current_y = positions[-1][:2]
+        # Get recent positions (last 3 for better analysis)
+        recent_positions = positions[-3:]
         
-        # Vehicle counted if: corner is at/past line Y AND within line X range
-        if current_y >= line_y and line_start_x <= current_x <= line_end_x:
-            return True
+        # Check if vehicle has been consistently moving downward
+        y_positions = [pos[1] for pos in recent_positions]
+        x_positions = [pos[0] for pos in recent_positions]
+        
+        # Calculate movement direction and speed
+        y_movement = y_positions[-1] - y_positions[0]  # Positive = downward movement
+        x_movement = x_positions[-1] - x_positions[0]  # Positive = rightward movement
+        
+        # Check if vehicle is moving downward (minimum movement threshold)
+        if y_movement < self.min_downward_movement:
+            return False
+        
+        # Check if vehicle has crossed the line
+        # Look for any position that's at or below the line
+        crossed_line = False
+        for i, (x, y, time) in enumerate(recent_positions):
+            if y >= line_y and line_start_x <= x <= line_end_x:
+                crossed_line = True
+                break
+        
+        if not crossed_line:
+            return False
+        
+        # Additional validation: ensure vehicle is moving in the right direction
+        # and has sufficient track history
+        if len(positions) < self.min_track_history:
+            return False
+        
+        # Check if vehicle has been tracked long enough
+        track_duration = positions[-1][2] - positions[0][2]
+        if track_duration < self.min_track_duration:
+            return False
+        
+        # Final check: ensure vehicle is currently in the counting area
+        current_x, current_y = positions[-1][:2]
+        if not (line_start_x <= current_x <= line_end_x and current_y >= line_y):
+            return False
+        
+        return True
+    
+    def _should_count_vehicle_zone_based(self, track_id: int) -> bool:
+        """
+        Alternative counting method using a counting zone instead of a line
+        
+        Args:
+            track_id: ID of the track
+            
+        Returns:
+            True if vehicle should be counted
+        """
+        track = self.track_histories[track_id]
+        positions = list(track['positions'])
+        
+        if len(positions) < 3:
+            return False
+        
+        # Get counting line coordinates
+        if 0 not in self.counting_lines or self.counting_lines[0] is None:
+            return False
+        
+        line_start_x, line_y, line_end_x, _ = self.counting_lines[0]
+        
+        # Define counting zone (area around the counting line)
+        zone_top = line_y - self.counting_zone_height // 2
+        zone_bottom = line_y + self.counting_zone_height // 2
+        
+        # Check if vehicle has entered the counting zone from above
+        entered_zone = False
+        exited_zone = False
+        
+        for i, (x, y, time) in enumerate(positions):
+            # Check if vehicle is in the counting zone horizontally
+            if line_start_x <= x <= line_end_x:
+                # Check if vehicle entered zone from above
+                if zone_top <= y <= zone_bottom:
+                    if not entered_zone:
+                        # Check if previous position was above the zone
+                        if i > 0:
+                            prev_x, prev_y, prev_time = positions[i-1]
+                            if prev_y < zone_top:
+                                entered_zone = True
+                        else:
+                            # First position in zone, check if we have downward movement
+                            if len(positions) >= 2:
+                                y_movement = y - positions[0][1]
+                                if y_movement >= self.min_downward_movement:
+                                    entered_zone = True
+                
+                # Check if vehicle exited zone below
+                if y > zone_bottom:
+                    if entered_zone and not exited_zone:
+                        exited_zone = True
+                        break
+        
+        # Vehicle should be counted if it entered the zone from above and exited below
+        if entered_zone and exited_zone:
+            # Additional validation
+            track_duration = positions[-1][2] - positions[0][2]
+            if track_duration >= self.min_track_duration and len(positions) >= self.min_track_history:
+                return True
         
         return False
     
@@ -242,7 +352,12 @@ class TrafficCounter:
             track_id: ID of the track
             vehicle_type: Type of vehicle
         """
-        # Mark as counted
+        # Double-check that vehicle hasn't been counted already
+        if track_id in self.track_histories and self.track_histories[track_id]['counted']:
+            print(f"⚠️  Vehicle {track_id} already counted, skipping duplicate count")
+            return
+        
+        # Mark as counted FIRST to prevent race conditions
         self.track_histories[track_id]['counted'] = True
         
         # Update counters (using road_id = 0 for all vehicles)
@@ -250,8 +365,6 @@ class TrafficCounter:
         self.road_counts[road_id]['total'] += 1
         self.road_counts[road_id]['by_type'][vehicle_type] += 1
         self.total_vehicles_seen += 1
-        
-        print(f"🚗 Counted {vehicle_type} (ID: {track_id}) - Total: {self.total_vehicles_seen}")
         
         # Determine direction (simplified)
         direction = self._get_vehicle_direction_simple(track_id)
@@ -261,6 +374,12 @@ class TrafficCounter:
         # Update hourly counts
         current_hour = int(time.time() // 3600)
         self.road_counts[road_id]['hourly_counts'][current_hour] += 1
+        
+        # Store pending count for delayed display
+        self.pending_counts[track_id] = {
+            'count_time': time.time(),
+            'vehicle_type': vehicle_type
+        }
         
         print(f"🚗 Counted {vehicle_type} (ID: {track_id}) - Total: {self.road_counts[road_id]['total']}")
     
@@ -275,6 +394,25 @@ class TrafficCounter:
             Direction string
         """
         return 'down'  # All counted vehicles are moving down towards bottom line
+    
+    def _process_pending_counts(self):
+        """
+        Process pending counts and display them after the specified delay
+        """
+        current_time = time.time()
+        expired_counts = []
+        
+        for track_id, count_data in self.pending_counts.items():
+            if current_time - count_data['count_time'] >= self.count_display_delay:
+                # Display the count with delay
+                vehicle_type = count_data['vehicle_type']
+                road_id = 0
+                print(f"📊 Displaying count for {vehicle_type} (ID: {track_id}) - Total: {self.road_counts[road_id]['total']}")
+                expired_counts.append(track_id)
+        
+        # Remove expired counts
+        for track_id in expired_counts:
+            del self.pending_counts[track_id]
     
     def _count_vehicle(self, track_id: int, road_id: int, vehicle_type: str):
         """
@@ -292,6 +430,9 @@ class TrafficCounter:
         self.road_counts[road_id]['total'] += 1
         self.road_counts[road_id]['by_type'][vehicle_type] += 1
         self.total_vehicles_seen += 1
+        
+        print(f"✅ Vehicle {track_id} ({vehicle_type}) counted! Total: {self.road_counts[road_id]['total']}")
+        
         
         # Determine direction
         direction = self._get_vehicle_direction(track_id)
@@ -363,15 +504,40 @@ class TrafficCounter:
         Returns:
             Dictionary with traffic count data
         """
+        # Count unique counted vehicles for verification
+        counted_vehicles = sum(1 for track in self.track_histories.values() if track.get('counted', False))
+        
         result = {
             'road_counts': dict(self.road_counts),
             'total_vehicles': self.total_vehicles_seen,
+            'counted_vehicles': counted_vehicles,  # Add verification count
             'session_duration': time.time() - self.start_time,
             'frame_count': self.frame_count,
             'active_tracks': len(self.track_histories)
         }
         
         return result
+    
+    def get_counted_vehicle_ids(self) -> List[int]:
+        """
+        Get list of vehicle IDs that have been counted
+        
+        Returns:
+            List of counted vehicle IDs
+        """
+        return [track_id for track_id, track in self.track_histories.items() 
+                if track.get('counted', False)]
+    
+    def reset_counters(self):
+        """
+        Reset all counters and tracking data
+        """
+        self.road_counts = {}
+        self.track_histories = {}
+        self.total_vehicles_seen = 0
+        self.start_time = time.time()
+        self.frame_count = 0
+        print("🔄 Traffic counters reset")
     
     def get_road_summary(self, road_id: int) -> Dict:
         """

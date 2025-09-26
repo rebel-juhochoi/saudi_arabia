@@ -10,7 +10,7 @@ class VideoProcessor:
     """
     VideoProcessor with tracking capabilities
     """
-    def __init__(self, vehicle_conf=0.7, iou_threshold=0.3, show_segmentation=True, enable_road_detection=True):
+    def __init__(self, vehicle_conf=0.7, iou_threshold=0.3, show_segmentation=True, enable_road_detection=True, count_display_delay=0.5):
         """
         Initialize VideoProcessor with shared models and tracker
         """
@@ -32,7 +32,8 @@ class VideoProcessor:
             vehicle_detector=self.vehicle_detector,
             iou_threshold=iou_threshold,
             road_detector=self.road_detector,
-            enable_traffic_counting=enable_road_detection  # Enable counting when road detection is enabled
+            enable_traffic_counting=enable_road_detection,  # Enable counting when road detection is enabled
+            count_display_delay=count_display_delay
         )
         
         # Initialize renderer
@@ -78,7 +79,7 @@ class VideoProcessor:
         
         return cap, fps, width, height, total_frames, output_path
     
-    def process_frame(self, frame, frame_count, frames_to_skip):
+    def process_frame(self, frame, frame_count):
         """Process a single frame through the unified tracker"""
         # Check if this is the first frame for road detection
         is_first_frame = (frame_count == 1)
@@ -89,19 +90,15 @@ class VideoProcessor:
         )
         detections = []  # Detections are handled internally by tracker
         
-        # Use renderer for annotation
-        if frame_count > frames_to_skip:
-            # Get traffic count data for display
-            traffic_counts = self.tracker.get_traffic_counts()
-            counting_lines = self.tracker.get_counting_lines_for_visualization()
-            
-            annotated_frame = self.renderer.annotate(
-                frame, detections, tracked_objects, 
-                traffic_counts=traffic_counts, 
-                counting_lines=counting_lines
-            )
-        else:
-            annotated_frame = frame
+        # Get traffic count data for display
+        traffic_counts = self.tracker.get_traffic_counts()
+        counting_lines = self.tracker.get_counting_lines_for_visualization()
+        
+        annotated_frame = self.renderer.annotate(
+            frame, detections, tracked_objects, 
+            traffic_counts=traffic_counts, 
+            counting_lines=counting_lines
+        )
         
         return annotated_frame, len(tracked_objects)
     
@@ -122,15 +119,12 @@ class VideoProcessor:
         
         cap, fps, width, height, total_frames, output_path = result
         
-        # Calculate frames to skip (1 second)
-        frames_to_skip = fps
-        
         # Process frames
         frame_count = 0
         last_progress = 0
         total_tracks = 0
         
-        print(f"Processing video with tracking... (skipping first {frames_to_skip} frames)")
+        print(f"Processing video with tracking...")
         
         try:
             while True:
@@ -141,7 +135,7 @@ class VideoProcessor:
                 frame_count += 1
                 
                 # Process frame
-                annotated_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+                annotated_frame, active_tracks = self.process_frame(frame, frame_count)
                 total_tracks = max(total_tracks, active_tracks)
                 
                 # Write frame to output video

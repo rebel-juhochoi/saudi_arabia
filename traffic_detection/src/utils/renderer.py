@@ -39,7 +39,9 @@ class Renderer:
         if traffic_counts:
             annotated_frame = self._draw_traffic_counts(annotated_frame, traffic_counts)
         
-        # Counting lines are now invisible (not drawn)
+        # Draw counting lines visibly (disabled for cleaner display)
+        # if counting_lines:
+        #     annotated_frame = self._draw_counting_lines(annotated_frame, counting_lines)
         
         return annotated_frame
     

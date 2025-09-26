@@ -7,7 +7,7 @@ class Tracker:
     """
     Tracker that handles vehicle detection, tracking, and visualization
     """
-    def __init__(self, vehicle_detector, iou_threshold=0.5, road_detector=None, enable_traffic_counting=True):
+    def __init__(self, vehicle_detector, iou_threshold=0.5, road_detector=None, enable_traffic_counting=True, count_display_delay=0.5):
         """
         Initialize tracker with provided models
         """
@@ -16,8 +16,12 @@ class Tracker:
         self.road_detector = road_detector
         self.enable_traffic_counting = enable_traffic_counting
         
-        # Initialize traffic counter
-        self.traffic_counter = TrafficCounter(road_detector) if enable_traffic_counting else None
+        # Initialize traffic counter with proper parameters
+        self.traffic_counter = TrafficCounter(
+            counting_line_position=0.80,
+            min_track_history=3,
+            count_display_delay=count_display_delay
+        ) if enable_traffic_counting else None
         
         # Track data structure: {track_id: {'bbox': [x1,y1,x2,y2], 'conf': conf, 'age': age, 'last_seen': frame, 'vehicle_type': 'unknown'}}
         self.tracks = {}
@@ -339,6 +343,29 @@ class Tracker:
         if self.traffic_counter:
             return self.traffic_counter.get_traffic_counts()
         return None
+    
+    def get_counted_vehicle_ids(self):
+        """
+        Get list of counted vehicle IDs for debugging
+        
+        Returns:
+            List of counted vehicle IDs or None if counting disabled
+        """
+        if self.traffic_counter:
+            return self.traffic_counter.get_counted_vehicle_ids()
+        return None
+    
+    def reset_traffic_counters(self):
+        """
+        Reset traffic counters
+        
+        Returns:
+            True if reset successful, False if counting disabled
+        """
+        if self.traffic_counter:
+            self.traffic_counter.reset_counters()
+            return True
+        return False
     
     def get_road_summary(self, road_id: int):
         """

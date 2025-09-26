@@ -25,7 +25,7 @@ const elements = {
     stopDemoBtn: document.getElementById('stop-demo-btn'),
     videoPanel: document.getElementById('video-panel'),
     videoCanvas: document.getElementById('video-canvas'),
-    streamStatus: document.getElementById('stream-status'),
+    streamStatus: document.getElementById('stream-status'), // Hidden for cleaner display
     segmentationToggle: document.getElementById('segmentation-toggle'),
     errorPanel: document.getElementById('error-panel'),
     errorMessage: document.getElementById('error-message'),
@@ -33,7 +33,7 @@ const elements = {
     trafficDashboard: document.getElementById('traffic-dashboard'),
     totalVehicles: document.getElementById('total-vehicles'),
     vehiclesPerMinute: document.getElementById('vehicles-per-minute'),
-    roadCounts: document.getElementById('road-counts'),
+    roadCounts: document.getElementById('road-counts'), // Hidden for cleaner display
     resetCountersBtn: document.getElementById('reset-counters-btn'),
     exportAnalyticsBtn: document.getElementById('export-analytics-btn')
 };
@@ -104,8 +104,10 @@ function connectDemoWebSocket() {
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/demo-stream`;
     
     console.log('Attempting to connect to demo:', wsUrl);
-    elements.streamStatus.textContent = 'Connecting...';
-    elements.streamStatus.className = 'stream-status';
+    if (elements.streamStatus) {
+        elements.streamStatus.textContent = 'Connecting...';
+        elements.streamStatus.className = 'stream-status';
+    }
     
     // Clean up any existing connection
     if (websocket) {
@@ -127,22 +129,45 @@ function connectDemoWebSocket() {
     // Wait a moment before creating new connection
     setTimeout(() => {
         websocket = new WebSocket(wsUrl);
+        websocket.binaryType = 'arraybuffer'; // Ensure binary data is received as ArrayBuffer
         canvasContext = elements.videoCanvas.getContext('2d');
         isStreaming = true;
         
         websocket.onopen = function(event) {
         console.log('WebSocket connected to:', wsUrl);
         reconnectAttempts = 0; // Reset reconnect attempts on successful connection
-        elements.streamStatus.textContent = 'Connected - Starting video stream...';
-        elements.streamStatus.className = 'stream-status processing';
+        if (elements.streamStatus) {
+            elements.streamStatus.textContent = 'Connected - Starting video stream...';
+            elements.streamStatus.className = 'stream-status processing';
+        }
     };
     
     websocket.onmessage = function(event) {
         try {
-            const data = JSON.parse(event.data);
-            handleStreamMessage(data);
+            console.log('WebSocket message received, type:', typeof event.data, 'constructor:', event.data.constructor.name);
+            
+            if (event.data instanceof ArrayBuffer) {
+                // Handle binary frame data (ArrayBuffer)
+                console.log('Processing ArrayBuffer frame, size:', event.data.byteLength);
+                handleBinaryFrame(event.data);
+            } else if (event.data instanceof Blob) {
+                // Handle binary frame data (Blob) - convert to ArrayBuffer
+                console.log('Processing Blob frame, size:', event.data.size);
+                const reader = new FileReader();
+                reader.onload = function() {
+                    handleBinaryFrame(reader.result);
+                };
+                reader.readAsArrayBuffer(event.data);
+            } else {
+                // Handle JSON messages
+                console.log('Processing JSON message:', event.data);
+                const data = JSON.parse(event.data);
+                handleStreamMessage(data);
+            }
         } catch (error) {
             console.error('Error parsing WebSocket message:', error);
+            console.error('Event data type:', typeof event.data);
+            console.error('Event data:', event.data);
         }
     };
     
@@ -156,8 +181,10 @@ function connectDemoWebSocket() {
             // Only attempt one reconnection for unexpected closures (not manual stops)
             if (reconnectAttempts === 0 && event.code !== 1000 && event.code !== 1001) {
                 reconnectAttempts++;
-                elements.streamStatus.textContent = 'Connection lost - Reconnecting...';
-                elements.streamStatus.className = 'stream-status';
+                if (elements.streamStatus) {
+                    elements.streamStatus.textContent = 'Connection lost - Reconnecting...';
+                    elements.streamStatus.className = 'stream-status';
+                }
                 
                 setTimeout(() => {
                     if (isStreaming) {
@@ -166,22 +193,51 @@ function connectDemoWebSocket() {
                     }
                 }, 2000);
             } else {
+            if (elements.streamStatus) {
                 elements.streamStatus.textContent = 'Connection closed';
                 elements.streamStatus.className = 'stream-status error';
+            }
                 stopDemoStream();
             }
         } else {
+        if (elements.streamStatus) {
             elements.streamStatus.textContent = 'Stream stopped';
             elements.streamStatus.className = 'stream-status';
+        }
         }
     };
     
         websocket.onerror = function(error) {
             console.error('WebSocket error:', error);
+        if (elements.streamStatus) {
             elements.streamStatus.textContent = 'Connection error - Retrying...';
             elements.streamStatus.className = 'stream-status error';
+        }
         };
     }, 100); // Small delay to ensure clean connection
+}
+
+function handleBinaryFrame(binaryData) {
+    // Convert ArrayBuffer to Blob and create image
+    const blob = new Blob([binaryData], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    
+    img.onload = function() {
+        // Draw the image to canvas
+        if (canvasContext && elements.videoCanvas) {
+            canvasContext.drawImage(img, 0, 0, elements.videoCanvas.width, elements.videoCanvas.height);
+        }
+        // Clean up the object URL
+        URL.revokeObjectURL(url);
+    };
+    
+    img.onerror = function() {
+        console.error('Error loading binary frame image');
+        URL.revokeObjectURL(url);
+    };
+    
+    img.src = url;
 }
 
 function handleStreamMessage(data) {
@@ -196,8 +252,33 @@ function handleStreamMessage(data) {
             elements.videoCanvas.width = canvasWidth;
             elements.videoCanvas.height = canvasHeight;
             
-            elements.streamStatus.textContent = `Processing ${data.width}x${data.height} video (${data.fps} FPS)`;
-            elements.streamStatus.className = 'stream-status processing';
+            const videoFpsText = data.fps ? ` (Video: ${data.fps} FPS)` : '';
+            const targetFpsText = data.target_fps ? ` (Target: ${data.target_fps} FPS)` : '';
+            const streamingFpsText = data.adaptive_fps ? ` (Streaming: ${data.adaptive_fps} FPS)` : '';
+            const binaryText = data.binary_transmission ? ' [Binary]' : '';
+            const ultraFastText = data.ultra_fast_mode ? ' [Ultra-Fast Pipeline]' : '';
+            const preloadText = data.preload_seconds ? ` [Preload: ${data.preload_seconds}s]` : '';
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = `Processing ${data.width}x${data.height} video${videoFpsText}${targetFpsText}${streamingFpsText}${binaryText}${ultraFastText}${preloadText}`;
+                elements.streamStatus.className = 'stream-status processing';
+            }
+            break;
+            
+        case 'frame_metadata':
+            // Handle metadata for binary frames
+            const skipText = data.frames_skipped > 0 ? ` [Skipped: ${data.frames_skipped}]` : '';
+            const adaptiveText = data.adaptive_fps ? ` [FPS: ${data.adaptive_fps}]` : '';
+            const pipelineText = data.pipeline_mode === 'ultra_fast' ? ' [Pipeline]' : '';
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = `Streaming live video${skipText}${adaptiveText}${pipelineText}`;
+                elements.streamStatus.className = 'stream-status processing';
+            }
+            
+            // Update traffic counts if available
+            if (data.traffic_counts) {
+                updateTrafficDashboard(data.traffic_counts);
+                showTrafficDashboard();
+            }
             break;
             
         case 'frame':
@@ -205,8 +286,10 @@ function handleStreamMessage(data) {
             displayFrame(data.frame);
             
             // Update status
-            elements.streamStatus.textContent = 'Streaming live video';
-            elements.streamStatus.className = 'stream-status processing';
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = 'Streaming live video';
+                elements.streamStatus.className = 'stream-status processing';
+            }
             
             // Update traffic counts if available
             if (data.traffic_counts) {
@@ -217,15 +300,19 @@ function handleStreamMessage(data) {
             
         case 'complete':
         case 'stream_ended':
-            elements.streamStatus.textContent = 'Stream ended - Video will restart shortly';
-            elements.streamStatus.className = 'stream-status processing';
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = 'Stream ended - Video will restart shortly';
+                elements.streamStatus.className = 'stream-status processing';
+            }
             // Don't set isStreaming to false - allow reconnection
             break;
             
         case 'error':
             showError(data.message);
-            elements.streamStatus.textContent = 'Error occurred';
-            elements.streamStatus.className = 'stream-status error';
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = 'Error occurred';
+                elements.streamStatus.className = 'stream-status error';
+            }
             isStreaming = false;
             break;
             
@@ -235,7 +322,19 @@ function handleStreamMessage(data) {
             
         case 'loop_restart':
             console.log('Video looping:', data.message);
-            elements.streamStatus.textContent = 'Video restarting...';
+            const loopCount = data.loop_count || 0;
+            if (elements.streamStatus) {
+                elements.streamStatus.textContent = `Video restarting... (Loop #${loopCount})`;
+                elements.streamStatus.className = 'stream-status processing';
+            }
+            break;
+            
+        case 'traffic_update':
+            // Handle real-time traffic data updates
+            if (data.traffic_counts) {
+                updateTrafficDashboard(data.traffic_counts);
+                showTrafficDashboard();
+            }
             break;
     }
 }
@@ -300,8 +399,10 @@ function stopDemoStream() {
         websocket = null;
     }
     
-    elements.streamStatus.textContent = 'Stopped';
-    elements.streamStatus.className = 'stream-status';
+    if (elements.streamStatus) {
+        elements.streamStatus.textContent = 'Stopped';
+        elements.streamStatus.className = 'stream-status';
+    }
 }
 
 function sendSegmentationToggle(enabled) {
@@ -498,6 +599,23 @@ function updateTrafficDashboard(trafficData) {
     
     // Update road-specific counts
     updateRoadCounts(trafficData.road_counts || {});
+    
+    // Add real-time indicator
+    const now = new Date();
+    const timeString = now.toLocaleTimeString();
+    
+    // Update or create real-time indicator
+    let realTimeIndicator = document.getElementById('real-time-indicator');
+    if (!realTimeIndicator) {
+        realTimeIndicator = document.createElement('div');
+        realTimeIndicator.id = 'real-time-indicator';
+        realTimeIndicator.className = 'real-time-indicator';
+        realTimeIndicator.innerHTML = '<i class="fas fa-circle"></i> Live';
+        elements.trafficDashboard.appendChild(realTimeIndicator);
+    }
+    
+    // Update timestamp
+    realTimeIndicator.title = `Last updated: ${timeString}`;
 }
 
 function updateRoadCounts(roadCounts) {

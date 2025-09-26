@@ -78,7 +78,8 @@ def initialize_demo_processor():
         vehicle_conf=DEMO_CONFIG["vehicle_conf"],
         iou_threshold=DEMO_CONFIG["iou_threshold"],
         show_segmentation=DEMO_CONFIG["show_segmentation"],
-        enable_road_detection=DEMO_CONFIG["enable_road_detection"]
+        enable_road_detection=DEMO_CONFIG["enable_road_detection"],
+        count_display_delay=4.0  # 2 second delay for better visual synchronization
     )
     print("Demo processor initialized!")
 
@@ -89,8 +90,8 @@ async def startup_event():
     initialize_demo_processor()
 
 
-class SimpleStreamingProcessor(VideoProcessor):
-    """Clean, simple streaming video processor"""
+class UltraFastStreamingProcessor(VideoProcessor):
+    """Ultra-fast streaming video processor with asynchronous pre-processing pipeline and zero-lag display"""
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -98,15 +99,73 @@ class SimpleStreamingProcessor(VideoProcessor):
         self.show_segmentation = kwargs.get('show_segmentation', False)
         self.streaming_speed = 1.0  # Normal speed
         
+        # Asynchronous pipeline optimization
+        self.frame_queue = asyncio.Queue(maxsize=30)  # Frame buffer
+        self.detection_queue = asyncio.Queue(maxsize=50)  # Detection results buffer
+        self.processed_frames = {}  # Frame cache with detection results
+        self.frame_workers = 2  # Reduced workers to prevent memory issues
+        self.preload_seconds = 2  # Pre-load 2 seconds of detections
+        
+        # Thread safety
+        self._frame_lock = asyncio.Lock()  # Lock for processed_frames access
+        self._cleanup_lock = asyncio.Lock()  # Lock for cleanup operations
+        
+        # Video FPS synchronization
+        self.video_fps = 30  # Will be detected from video
+        self.target_fps = 30  # Target FPS (same as video FPS)
+        self.frame_interval = 1.0 / 30  # Time between frames in seconds
+        
+        # Adaptive FPS optimization (now based on video FPS)
+        self.processing_times = deque(maxlen=10)  # Track last 10 frames
+        self.adaptive_fps = 30  # Start with video FPS
+        self.min_fps = 15
+        self.max_fps = 60  # Maximum FPS (2x video FPS for smoothness)
+        self.fps_adjustment_threshold = 0.01  # 10ms threshold
+        
+        # Frame skipping optimization
+        self.frames_skipped = 0
+        self.max_skip_ratio = 0.1  # Reduced skip ratio for better quality
+        self.skip_threshold = 0.03  # Skip if processing takes > 30ms
+        self.consecutive_skips = 0
+        self.max_consecutive_skips = 3
+        
+        # Binary transmission optimization
+        self.use_binary_transmission = True
+        self.compression_quality = 90  # Higher quality for better detection
+    
+    def _detect_video_fps(self, cap):
+        """Detect video FPS and update synchronization settings"""
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps > 0:
+            self.video_fps = fps
+            self.target_fps = fps
+            self.frame_interval = 1.0 / fps
+            self.adaptive_fps = min(fps, 60)  # Cap at 60 FPS for smoothness
+            self.max_fps = min(fps * 2, 120)  # Max 2x video FPS
+            print(f"Detected video FPS: {fps}, Target FPS: {self.target_fps}")
+        else:
+            print("Could not detect video FPS, using default 30 FPS")
+            self.video_fps = 30
+            self.target_fps = 30
+            self.frame_interval = 1.0 / 30
+            self.adaptive_fps = 30
+        
+        # Pipeline state
+        self.pipeline_started = False
+        self.detection_workers = []
+        self.current_frame_id = 0
+        
     async def stream_video(self, video_path: str, websocket: WebSocket):
-        """Main streaming method - simple and clean"""
+        """Ultra-fast streaming with asynchronous pre-processing pipeline"""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             await websocket.send_text(json.dumps({"type": "error", "message": "Could not open video"}))
             return
         
+        # Detect video FPS and update synchronization settings
+        self._detect_video_fps(cap)
+        
         # Get video properties
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -114,101 +173,356 @@ class SimpleStreamingProcessor(VideoProcessor):
         # Send video info to frontend
         await websocket.send_text(json.dumps({
             "type": "video_info",
-            "fps": fps,
+            "fps": self.video_fps,
+            "target_fps": self.target_fps,
             "width": width,
             "height": height,
-            "total_frames": total_frames
+            "total_frames": total_frames,
+            "adaptive_fps": self.adaptive_fps,
+            "binary_transmission": self.use_binary_transmission,
+            "ultra_fast_mode": True,
+            "preload_seconds": self.preload_seconds
         }))
         
         self.is_streaming = True
-        frame_count = 0
-        frames_to_skip = fps  # Skip first second
+        self.current_frame_id = 0
         
-        # Calculate frame timing for controlled playback
-        target_fps = 25  # Target 25 FPS for smooth real-time viewing
-        frame_delay = (1.0 / target_fps) / self.streaming_speed
+        # Reset optimization counters
+        self.frames_skipped = 0
+        self.consecutive_skips = 0
+        self.processing_times.clear()
+        self.processed_frames.clear()
         
+        # Start asynchronous pipeline
+        await self._start_async_pipeline(cap, websocket)
+    
+    async def _start_async_pipeline(self, cap, websocket):
+        """Start the asynchronous processing pipeline"""
+        detection_tasks = []
         try:
-            while self.is_streaming:
-                ret, frame = cap.read()
+            # Start parallel detection workers
+            for i in range(self.frame_workers):
+                task = asyncio.create_task(self._detection_worker(f"worker-{i}"))
+                detection_tasks.append(task)
+            
+            # Start frame reader task
+            reader_task = asyncio.create_task(self._frame_reader(cap, websocket))
+            
+            # Start frame sender task
+            sender_task = asyncio.create_task(self._frame_sender(websocket))
+            
+            # Start traffic data updater task for real-time synchronization
+            traffic_updater_task = asyncio.create_task(self._traffic_data_updater(websocket))
+            
+            # Wait for all tasks
+            await asyncio.gather(reader_task, sender_task, traffic_updater_task, *detection_tasks)
+            
+        except Exception as e:
+            print(f"Pipeline error: {e}")
+            await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+        finally:
+            # Cancel all tasks
+            for task in detection_tasks:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            
+            # Clean up resources
+            await self._cleanup_resources()
+            cap.release()
+            self.is_streaming = False
+    
+    async def _cleanup_resources(self):
+        """Clean up resources to prevent memory corruption"""
+        try:
+            async with self._cleanup_lock:
+                # Clear processed frames
+                self.processed_frames.clear()
                 
-                if not ret:
-                    # End of video - restart for looping
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    frame_count = 0
-                    await asyncio.sleep(0.1)  # Brief pause before restart
-                    continue
+                # Clear queues
+                while not self.frame_queue.empty():
+                    try:
+                        self.frame_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
                 
-                frame_count += 1
+                while not self.detection_queue.empty():
+                    try:
+                        self.detection_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
                 
-                # Get event loop once
-                loop = asyncio.get_event_loop()
-                
-                # Process frame if past skip period
-                if frame_count > frames_to_skip:
-                    # Run inference in thread pool to avoid blocking
-                    processed_frame, active_tracks, traffic_data = await loop.run_in_executor(
-                        None, self._process_frame_safe, frame, frame_count, frames_to_skip
-                    )
-                else:
-                    processed_frame = frame
-                    active_tracks = 0
-                    traffic_data = None
-                
-                # Encode frame to base64
-                encoded_frame = await loop.run_in_executor(
-                    None, self._encode_frame, processed_frame
-                )
-                
-                if encoded_frame:
-                    # Send frame to frontend
-                    message = {
-                        "type": "frame",
-                        "frame": encoded_frame,
-                        "frame_count": frame_count,
-                        "active_tracks": active_tracks,
-                        "traffic_counts": traffic_data
-                    }
-                    
-                    await websocket.send_text(json.dumps(message))
-                
-                # Control playback speed
-                await asyncio.sleep(frame_delay)
+                # Force garbage collection
+                import gc
+                gc.collect()
                 
         except Exception as e:
-            print(f"Streaming error: {e}")
-            await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
-        
-        finally:
-            self.is_streaming = False
-            cap.release()
-            print("Video streaming stopped")
+            print(f"Cleanup error: {e}")
     
-    def _process_frame_safe(self, frame, frame_count, frames_to_skip):
-        """Safely process frame with error handling"""
+    async def _frame_reader(self, cap, websocket):
+        """Continuously read frames and add to queue with looping support"""
+        frame_id = 0
+        loop_count = 0
+        
+        while self.is_streaming:
+            ret, frame = cap.read()
+            if not ret:
+                # End of video - restart for looping
+                loop_count += 1
+                print(f"Video ended, restarting loop #{loop_count}")
+                
+                # Notify frontend about loop restart
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "loop_restart",
+                        "message": f"Video restarting (loop #{loop_count})",
+                        "loop_count": loop_count
+                    }))
+                except Exception as e:
+                    print(f"Failed to send loop restart notification: {e}")
+                
+                # Reset video to beginning
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_id = 0
+                
+                # Clear processed frames cache for new loop
+                async with self._frame_lock:
+                    self.processed_frames.clear()
+                
+                await asyncio.sleep(0.1)
+                continue
+            
+            frame_id += 1
+            
+            # Add frame to processing queue
+            try:
+                await self.frame_queue.put({
+                    'frame_id': frame_id,
+                    'frame': frame.copy(),
+                    'timestamp': time.time(),
+                    'loop_count': loop_count
+                })
+            except asyncio.QueueFull:
+                # Skip frame if queue is full
+                self.frames_skipped += 1
+                continue
+    
+    async def _detection_worker(self, worker_name):
+        """Worker that processes frames for detection"""
+        while self.is_streaming:
+            try:
+                # Get frame from queue with timeout
+                frame_data = await asyncio.wait_for(self.frame_queue.get(), timeout=1.0)
+                frame_id = frame_data['frame_id']
+                frame = frame_data['frame']
+                
+                # Process frame for detection
+                loop = asyncio.get_event_loop()
+                processed_frame, active_tracks, traffic_data = await loop.run_in_executor(
+                    None, self._process_frame_safe, frame, frame_id
+                )
+                
+                # Store processed frame with thread safety
+                async with self._frame_lock:
+                    self.processed_frames[frame_id] = {
+                        'processed_frame': processed_frame,
+                        'active_tracks': active_tracks,
+                        'traffic_data': traffic_data,
+                        'timestamp': time.time(),
+                        'loop_count': frame_data.get('loop_count', 0)
+                    }
+                    
+                    # Clean up old frames (keep last 50 to reduce memory usage)
+                    if len(self.processed_frames) > 50:
+                        oldest_key = min(self.processed_frames.keys())
+                        del self.processed_frames[oldest_key]
+                
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                print(f"Detection worker {worker_name} error: {e}")
+                # Add small delay to prevent rapid error loops
+                await asyncio.sleep(0.1)
+                continue
+    
+    async def _frame_sender(self, websocket):
+        """Send frames to client with pre-loaded detections at video FPS"""
+        loop = asyncio.get_event_loop()
+        last_sent_frame = 0
+        last_frame_time = time.time()
+        current_loop_count = 0
+        
+        while self.is_streaming:
+            try:
+                # Calculate time since last frame
+                current_time = time.time()
+                time_since_last_frame = current_time - last_frame_time
+                
+                # Only send frame if enough time has passed (respect video FPS)
+                if time_since_last_frame < self.frame_interval:
+                    await asyncio.sleep(self.frame_interval - time_since_last_frame)
+                    continue
+                
+                # Look for next frame to send with thread safety
+                frame_to_send = None
+                async with self._frame_lock:
+                    # Check if we need to reset for a new loop
+                    if self.processed_frames:
+                        # Get the loop count from the first available frame
+                        first_frame_id = min(self.processed_frames.keys())
+                        frame_data = self.processed_frames[first_frame_id]
+                        if isinstance(frame_data, dict) and frame_data.get('loop_count', 0) > current_loop_count:
+                            # New loop started, reset frame counter
+                            current_loop_count = frame_data.get('loop_count', 0)
+                            last_sent_frame = 0
+                            print(f"Frame sender: New loop detected (#{current_loop_count}), resetting frame counter")
+                    
+                    for frame_id in range(last_sent_frame + 1, last_sent_frame + 10):
+                        if frame_id in self.processed_frames:
+                            frame_to_send = self.processed_frames[frame_id]
+                            last_sent_frame = frame_id
+                            break
+                
+                if frame_to_send is None:
+                    # No processed frame available, send raw frame
+                    try:
+                        frame_data = await asyncio.wait_for(self.frame_queue.get(), timeout=0.1)
+                        frame_to_send = {
+                            'processed_frame': frame_data['frame'],
+                            'active_tracks': 0,
+                            'traffic_data': None,
+                            'timestamp': time.time()
+                        }
+                    except asyncio.TimeoutError:
+                        await asyncio.sleep(0.01)  # Short wait
+                        continue
+                
+                # Update timing
+                last_frame_time = current_time
+                
+                # Get current traffic data for real-time synchronization
+                current_traffic_data = None
+                if hasattr(self, 'tracker') and self.tracker:
+                    current_traffic_data = self.tracker.get_traffic_counts()
+                
+                # Use current traffic data if available, otherwise use frame data
+                traffic_data_to_send = current_traffic_data if current_traffic_data else frame_to_send.get('traffic_data')
+                
+                # Encode and send frame
+                if self.use_binary_transmission:
+                    encoded_frame = await loop.run_in_executor(
+                        None, self._encode_frame_binary, frame_to_send['processed_frame']
+                    )
+                    
+                    if encoded_frame:
+                        await websocket.send_bytes(encoded_frame)
+                        
+                        metadata = {
+                            "type": "frame_metadata",
+                            "frame_count": last_sent_frame,
+                            "active_tracks": frame_to_send['active_tracks'],
+                            "traffic_counts": traffic_data_to_send,
+                            "adaptive_fps": self.adaptive_fps,
+                            "frames_skipped": self.frames_skipped,
+                            "pipeline_mode": "ultra_fast",
+                            "timestamp": time.time()
+                        }
+                        await websocket.send_text(json.dumps(metadata))
+                else:
+                    # Fallback to base64
+                    encoded_frame = await loop.run_in_executor(
+                        None, self._encode_frame, frame_to_send['processed_frame']
+                    )
+                    
+                    if encoded_frame:
+                        message = {
+                            "type": "frame",
+                            "frame": encoded_frame,
+                            "frame_count": last_sent_frame,
+                            "active_tracks": frame_to_send['active_tracks'],
+                            "traffic_counts": traffic_data_to_send,
+                            "adaptive_fps": self.adaptive_fps,
+                            "frames_skipped": self.frames_skipped,
+                            "pipeline_mode": "ultra_fast",
+                            "timestamp": time.time()
+                        }
+                        await websocket.send_text(json.dumps(message))
+                
+                # Dynamic frame delay
+                frame_delay = (1.0 / self.adaptive_fps) / self.streaming_speed
+                await asyncio.sleep(frame_delay)
+                
+            except Exception as e:
+                print(f"Frame sender error: {e}")
+                await asyncio.sleep(0.1)
+    
+    async def _traffic_data_updater(self, websocket):
+        """Send periodic traffic data updates for real-time synchronization"""
+        last_traffic_data = None
+        update_interval = 0.1  # Update every 100ms for real-time feel
+        
+        while self.is_streaming:
+            try:
+                # Get current traffic data
+                current_traffic_data = None
+                if hasattr(self, 'tracker') and self.tracker:
+                    current_traffic_data = self.tracker.get_traffic_counts()
+                
+                # Only send if data has changed
+                if current_traffic_data and current_traffic_data != last_traffic_data:
+                    traffic_update = {
+                        "type": "traffic_update",
+                        "traffic_counts": current_traffic_data,
+                        "timestamp": time.time()
+                    }
+                    await websocket.send_text(json.dumps(traffic_update))
+                    last_traffic_data = current_traffic_data
+                
+                await asyncio.sleep(update_interval)
+                
+            except Exception as e:
+                print(f"Traffic data updater error: {e}")
+                await asyncio.sleep(0.5)  # Wait longer on error
+                continue
+    
+    def _process_frame_safe(self, frame, frame_count):
+        """Safely process frame with error handling and memory management"""
         try:
+            # Create a copy of the frame to prevent memory issues
+            frame_copy = frame.copy()
+            
             # Update renderer segmentation setting
             if hasattr(self, 'renderer') and self.renderer is not None:
                 self.renderer.show_segmentation = self.show_segmentation
             
             # Process frame
-            processed_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+            processed_frame, active_tracks = self.process_frame(frame_copy, frame_count)
             
             # Get traffic count data
             traffic_data = None
             if hasattr(self, 'tracker') and self.tracker:
-                traffic_counts = self.tracker.get_traffic_counts()
-                if traffic_counts:
-                    traffic_data = {
-                        'total_vehicles': traffic_counts.get('total_vehicles', 0),
-                        'road_counts': {str(k): v for k, v in traffic_counts.get('road_counts', {}).items()},
-                        'session_duration': traffic_counts.get('session_duration', 0)
-                    }
+                try:
+                    traffic_counts = self.tracker.get_traffic_counts()
+                    if traffic_counts:
+                        traffic_data = {
+                            'total_vehicles': traffic_counts.get('total_vehicles', 0),
+                            'road_counts': {str(k): v for k, v in traffic_counts.get('road_counts', {}).items()},
+                            'session_duration': traffic_counts.get('session_duration', 0)
+                        }
+                except Exception as e:
+                    print(f"Traffic count error: {e}")
+                    traffic_data = None
             
-            return processed_frame, active_tracks, traffic_data
+            # Ensure we return a copy to prevent memory corruption
+            return processed_frame.copy() if processed_frame is not None else frame_copy, active_tracks, traffic_data
+            
         except Exception as e:
             print(f"Frame processing error: {e}")
-            return frame, 0, None
+            # Return original frame as fallback
+            return frame.copy() if frame is not None else None, 0, None
     
     def _encode_frame(self, frame):
         """Encode frame to base64"""
@@ -229,6 +543,52 @@ class SimpleStreamingProcessor(VideoProcessor):
     def set_speed(self, speed: float):
         """Set streaming speed"""
         self.streaming_speed = max(0.1, min(3.0, speed))
+    
+    def _should_skip_frame(self, frame_count: int) -> bool:
+        """Determine if current frame should be skipped for performance"""
+        # Don't skip if we've already skipped too many frames
+        if self.frames_skipped >= frame_count * self.max_skip_ratio:
+            return False
+        
+        # Don't skip if we've skipped too many consecutive frames
+        if self.consecutive_skips >= self.max_consecutive_skips:
+            return False
+        
+        # Skip if processing is taking too long
+        if len(self.processing_times) > 0:
+            avg_processing_time = sum(self.processing_times) / len(self.processing_times)
+            if avg_processing_time > self.skip_threshold:
+                return True
+        
+        return False
+    
+    def _adjust_adaptive_fps(self):
+        """Adjust FPS based on processing performance"""
+        if len(self.processing_times) < 3:  # Need at least 3 samples
+            return
+        
+        avg_processing_time = sum(self.processing_times) / len(self.processing_times)
+        target_frame_time = 1.0 / self.adaptive_fps
+        
+        if avg_processing_time > target_frame_time * 0.8:  # If processing takes > 80% of frame time
+            # Reduce FPS
+            self.adaptive_fps = max(self.min_fps, self.adaptive_fps - 2)
+        elif avg_processing_time < target_frame_time * 0.4:  # If processing takes < 40% of frame time
+            # Increase FPS
+            self.adaptive_fps = min(self.max_fps, self.adaptive_fps + 1)
+    
+    def _encode_frame_binary(self, frame):
+        """Encode frame as binary data for efficient transmission"""
+        try:
+            # Compress frame as JPEG
+            _, buffer = cv2.imencode('.jpg', frame, [
+                cv2.IMWRITE_JPEG_QUALITY, self.compression_quality,
+                cv2.IMWRITE_JPEG_OPTIMIZE, 1
+            ])
+            return buffer.tobytes()
+        except Exception as e:
+            print(f"Binary frame encoding error: {e}")
+            return None
     
     def toggle_segmentation(self, enabled: bool):
         """Toggle segmentation display"""
@@ -291,15 +651,12 @@ class CustomVideoProcessor(VideoProcessor):
             
             cap, fps, width, height, total_frames, _ = result
             
-            # Calculate frames to skip (1 second)
-            frames_to_skip = fps
-            
             # Process frames
             frame_count = 0
             last_progress = 0
             total_tracks = 0
             
-            processing_status[job_id]["message"] = f"Processing video... (skipping first {frames_to_skip} frames)"
+            processing_status[job_id]["message"] = f"Processing video..."
             
             while True:
                 ret, frame = cap.read()
@@ -309,7 +666,7 @@ class CustomVideoProcessor(VideoProcessor):
                 frame_count += 1
                 
                 # Process frame
-                annotated_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+                annotated_frame, active_tracks = self.process_frame(frame, frame_count)
                 total_tracks = max(total_tracks, active_tracks)
                 
                 # Write frame to output video
@@ -558,7 +915,7 @@ async def websocket_demo_stream(websocket: WebSocket):
     
     try:
         # Create simple streaming processor with demo config
-        processor = SimpleStreamingProcessor(
+        processor = UltraFastStreamingProcessor(
             vehicle_conf=DEMO_CONFIG["vehicle_conf"],
             iou_threshold=DEMO_CONFIG["iou_threshold"],
             show_segmentation=DEMO_CONFIG["show_segmentation"],
@@ -600,7 +957,7 @@ async def websocket_demo_stream(websocket: WebSocket):
         print("WebSocket connection closed")
 
 
-async def handle_stream_controls(websocket: WebSocket, processor: SimpleStreamingProcessor):
+async def handle_stream_controls(websocket: WebSocket, processor: UltraFastStreamingProcessor):
     """Handle control messages from client - clean and simple"""
     try:
         while processor.is_streaming:
@@ -696,6 +1053,22 @@ async def reset_traffic_counters():
         return {"message": "Traffic counters reset"}
     
     return {"message": "No traffic counters to reset"}
+
+@app.get("/debug/counted-vehicles")
+async def get_counted_vehicles():
+    """Get list of counted vehicle IDs for debugging"""
+    try:
+        if demo_processor and hasattr(demo_processor, 'tracker'):
+            counted_ids = demo_processor.tracker.get_counted_vehicle_ids()
+            traffic_counts = demo_processor.tracker.get_traffic_counts()
+            return {
+                "counted_vehicle_ids": counted_ids,
+                "total_counted": len(counted_ids),
+                "traffic_counts": traffic_counts
+            }
+        return {"message": "No processor available"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/health")
