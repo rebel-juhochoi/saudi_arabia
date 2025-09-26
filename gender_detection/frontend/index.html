@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gender Detection Demo</title>
+    <title>Zone Guidance Demo</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎥</text></svg>" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -11,8 +11,8 @@
 <body>
     <div class="container">
         <header>
-            <h1><i class="fas fa-video"></i> Gender Detection Demo</h1>
-            <p>Upload a video to detect and track people with gender classification</p>
+            <h1><i class="fas fa-video"></i> Zone Guidance Demo</h1>
+            <p>Monitor zone entrances and guide people with intelligent detection</p>
         </header>
 
         <main>
@@ -53,11 +53,11 @@
 
             <!-- Streaming Video Display -->
             <div id="video-panel" class="video-panel" style="display: none;">
-                <h2><i class="fas fa-eye"></i> Live Gender Detection Processing</h2>
+                <h2><i class="fas fa-eye"></i> Live Zone Guidance Processing</h2>
                 
                 <!-- Gender Switch Controls -->
                 <div class="gender-controls">
-                    <h3><i class="fas fa-users"></i> Gender Detection Settings</h3>
+                    <h3><i class="fas fa-users"></i> Zone Access Settings</h3>
                     <div class="gender-switches">
                         <label class="gender-switch">
                             <input type="checkbox" id="man-switch" checked>
@@ -82,7 +82,7 @@
                 <div class="alarm-panel">
                     <div id="alarm-status" class="alarm-status normal">
                         <i class="fas fa-check-circle"></i>
-                        <span id="alarm-text">System monitoring - Ready</span>
+                        <span id="alarm-text">Zone monitoring - Ready</span>
                     </div>
                 </div>
                 
@@ -124,7 +124,7 @@
         </main>
 
         <footer>
-            <p>&copy; 2025 Gender Detection Demo | Powered by RBLN Technologies</p>
+            <p>&copy; 2025 Zone Guidance Demo | Powered by RBLN Technologies</p>
         </footer>
     </div>
 

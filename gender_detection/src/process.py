@@ -77,16 +77,13 @@ class VideoProcessor:
         
         return cap, fps, width, height, total_frames, output_path
     
-    def process_frame(self, frame, frame_count, frames_to_skip):
+    def process_frame(self, frame, frame_count):
         """Process a single frame through the unified tracker"""
         # Delegate everything to the unified tracker
         detections, tracked_objects = self.tracker.detect_and_track(frame, frame.shape)
         
         # Use renderer for annotation
-        if frame_count > frames_to_skip:
-            annotated_frame = self.renderer.annotate(frame, detections, tracked_objects)
-        else:
-            annotated_frame = frame
+        annotated_frame = self.renderer.annotate(frame, detections, tracked_objects)
         
         return annotated_frame, len(tracked_objects)
     
@@ -107,15 +104,12 @@ class VideoProcessor:
         
         cap, fps, width, height, total_frames, output_path = result
         
-        # Calculate frames to skip (1 second)
-        frames_to_skip = fps
-        
         # Process frames
         frame_count = 0
         last_progress = 0
         total_tracks = 0
         
-        print(f"Processing video with tracking... (skipping first {frames_to_skip} frames)")
+        print(f"Processing video with tracking...")
         
         try:
             while True:
@@ -126,7 +120,7 @@ class VideoProcessor:
                 frame_count += 1
                 
                 # Process frame
-                annotated_frame, active_tracks = self.process_frame(frame, frame_count, frames_to_skip)
+                annotated_frame, active_tracks = self.process_frame(frame, frame_count)
                 total_tracks = max(total_tracks, active_tracks)
                 
                 # Write frame to output video

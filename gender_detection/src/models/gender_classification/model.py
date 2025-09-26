@@ -17,6 +17,9 @@ class GenderClassifier:
     def __init__(self, conf_threshold=0.5):
         """
         Initialize gender classifier
+        
+        Args:
+            conf_threshold: Confidence threshold for gender classification
         """
         self.conf_threshold = conf_threshold
         self.model_name = "deepface_gender"

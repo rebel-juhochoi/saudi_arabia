@@ -119,8 +119,6 @@ class VideoStreamProcessor:
         cap = video_data['cap']
         fps = video_data['fps']
         
-        # Calculate frames to skip (1 second) - only for first loop
-        frames_to_skip = fps
         is_first_loop = True
         
         print(f"Starting stream for video {video_num}: {video_data['name']}")
@@ -137,9 +135,6 @@ class VideoStreamProcessor:
                     is_first_loop = False  # Disable skip for subsequent loops
                     continue
                 
-                # Skip first second only on first loop
-                if is_first_loop and cap.get(cv2.CAP_PROP_POS_FRAMES) <= frames_to_skip:
-                    continue
                 
                 # Process frame through tracker
                 detections, tracked_objects = tracker.detect_and_track(frame)

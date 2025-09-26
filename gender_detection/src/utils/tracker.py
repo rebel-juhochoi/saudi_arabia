@@ -15,7 +15,7 @@ class Tracker:
         self.iou_threshold = iou_threshold
         self.enable_color_heuristic = enable_color_heuristic
         
-        # Track data structure: {track_id: {'bbox': [x1,y1,x2,y2], 'conf': conf, 'age': age, 'last_seen': frame, 'gender_counts': {'Man': 0, 'Woman': 0}, 'gender': 'Unknown', 'color_percentages': {'black': 0.0, 'white': 0.0, 'red': 0.0, 'brown': 0.0, 'pink': 0.0, 'blue': 0.0, 'green': 0.0, 'yellow': 0.0, 'orange': 0.0, 'purple': 0.0, 'gray': 0.0}, 'top_colors': []}}
+        # Track data structure: {track_id: {'bbox': [x1,y1,x2,y2], 'conf': conf, 'age': age, 'last_seen': frame, 'gender_counts': {'Man': 0, 'Woman': 0}, 'gender': 'Unknown', 'color_percentages': {'black': 0.0, 'white': 0.0, 'red': 0.0, 'brown': 0.0, 'pink': 0.0, 'blue': 0.0, 'green': 0.0, 'yellow': 0.0, 'orange': 0.0, 'purple': 0.0, 'gray': 0.0}, 'color_counts': {'black': 0, 'white': 0}, 'dominant_color': 'Unknown', 'top_colors': []}}
         # Color heuristic: Priority 1 = black OR pink in top 2 → Woman, Priority 2 = white OR red in top 2 → Man, else → Woman
         self.tracks = {}
         self.next_track_id = 1
@@ -53,7 +53,40 @@ class Tracker:
         if self.frame_count % 10 == 0:
             self.merge_overlapping_objects()
         
+        # Step 4: Clean up old tracks periodically to prevent memory buildup
+        if self.frame_count % 30 == 0:  # Every 30 frames (less frequent)
+            self._cleanup_old_tracks()
+        
         return detections, tracked_objects
+    
+    def _cleanup_old_tracks(self):
+        """Clean up old tracks to prevent memory buildup"""
+        tracks_to_remove = []
+        
+        for track_id, track_data in self.tracks.items():
+            # Remove tracks that are very old or have been inactive
+            if track_data['age'] > 15:  # Less aggressive cleanup
+                tracks_to_remove.append(track_id)
+            elif track_data['age'] > 5 and track_data.get('last_seen', 0) > 10:
+                # Remove tracks that are old and haven't been seen recently
+                tracks_to_remove.append(track_id)
+        
+        # Remove old tracks
+        for track_id in tracks_to_remove:
+            if track_id in self.tracks:
+                del self.tracks[track_id]
+        
+        if tracks_to_remove:
+            print(f"Cleaned up {len(tracks_to_remove)} old tracks. Remaining: {len(self.tracks)}")
+    
+    def reset_tracker(self):
+        """Complete tracker reset - only called during loop restart or video switch"""
+        print(f"Resetting tracker completely ({len(self.tracks)} tracks)...")
+        self.tracks.clear()
+        self.track_history.clear()
+        self.next_track_id = 1
+        self.frame_count = 0
+        print("Tracker reset complete")
     
     def _update_tracker(self, detections, frame):
         """
@@ -114,6 +147,8 @@ class Tracker:
                 'gender_counts': {'Man': 0, 'Woman': 0},
                 'gender': 'Unknown',
                 'color_percentages': {'black': 0.0, 'white': 0.0, 'red': 0.0, 'brown': 0.0, 'pink': 0.0, 'blue': 0.0, 'green': 0.0, 'yellow': 0.0, 'orange': 0.0, 'purple': 0.0, 'gray': 0.0},
+                'color_counts': {'black': 0, 'white': 0},
+                'dominant_color': 'Unknown',
                 'top_colors': []
             }
             if len(detection) > 6:  # If mask is available
@@ -272,37 +307,44 @@ class Tracker:
                 if confidence >= self.gender_classifier.conf_threshold:
                     if self.enable_color_heuristic:
                         # Color heuristic mode: top 2 colors analysis
+                        # Safety check to ensure track still exists and has required keys
+                        if track_id not in self.tracks:
+                            return None
                         top_colors = self.tracks[track_id].get('top_colors', [])
                         
                         # Priority check: If black OR pink is in top 2, classify as woman (overrides other logic)
                         if 'black' in top_colors or 'pink' in top_colors:
                             # Black or pink in top 2: increment woman count (overrides white/red logic)
-                            self.tracks[track_id]['gender_counts']['Woman'] += 1
+                            if 'gender_counts' in self.tracks[track_id]:
+                                self.tracks[track_id]['gender_counts']['Woman'] += 1
                             predicted_gender = 'Woman'
                         # Secondary check: Male condition: white OR red (or both) in top 2 colors
                         elif 'white' in top_colors or 'red' in top_colors:
                             # Either white or red (or both) in top 2: increment man count
-                            self.tracks[track_id]['gender_counts']['Man'] += 1
+                            if 'gender_counts' in self.tracks[track_id]:
+                                self.tracks[track_id]['gender_counts']['Man'] += 1
                             predicted_gender = 'Man'
                         else:
                             # Neither black, white, nor red in top 2: default to female
-                            self.tracks[track_id]['gender_counts']['Woman'] += 1
+                            if 'gender_counts' in self.tracks[track_id]:
+                                self.tracks[track_id]['gender_counts']['Woman'] += 1
                             predicted_gender = 'Woman'
                     else:
                         # Normal mode: use deepface only
-                        if gender in self.tracks[track_id]['gender_counts']:
+                        if 'gender_counts' in self.tracks[track_id] and gender in self.tracks[track_id]['gender_counts']:
                             self.tracks[track_id]['gender_counts'][gender] += 1
                             predicted_gender = gender
                         else:
                             predicted_gender = None
                     
                     # Update the most likely gender based on counts
-                    counts = self.tracks[track_id]['gender_counts']
-                    if counts['Man'] > counts['Woman']:
-                        self.tracks[track_id]['gender'] = 1
-                    elif counts['Woman'] > counts['Man']:
-                        self.tracks[track_id]['gender'] = 0
-                    # Keep 'Unknown' if counts are equal
+                    if 'gender_counts' in self.tracks[track_id]:
+                        counts = self.tracks[track_id]['gender_counts']
+                        if counts['Man'] > counts['Woman']:
+                            self.tracks[track_id]['gender'] = 'Man'
+                        elif counts['Woman'] > counts['Man']:
+                            self.tracks[track_id]['gender'] = 'Woman'
+                        # Keep 'Unknown' if counts are equal
                     
                     return predicted_gender
                     
@@ -391,7 +433,12 @@ class Tracker:
         for gender in ['Man', 'Woman']:
             keep_track['gender_counts'][gender] += merge_track['gender_counts'][gender]
         
-        # Merge color counts
+        # Merge color counts (with safety check)
+        if 'color_counts' not in keep_track:
+            keep_track['color_counts'] = {'black': 0, 'white': 0}
+        if 'color_counts' not in merge_track:
+            merge_track['color_counts'] = {'black': 0, 'white': 0}
+        
         for color in ['black', 'white']:
             keep_track['color_counts'][color] += merge_track['color_counts'][color]
         
