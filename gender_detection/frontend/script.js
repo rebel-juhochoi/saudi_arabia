@@ -129,8 +129,8 @@ function checkZoneAlarm(detectedGenders) {
     // Case 2: Only Man switch ON
     if (manEnabled && !womanEnabled) {
         console.log('Only Man switch ON - checking detected zones');
-        // Check for Woman (assuming 1 = Woman, 0 = Man) or multiple zones
-        if (detectedGenders.length === 2 || detectedGenders.includes(0)) {
+        // Check for Woman or multiple zones
+        if (detectedGenders.length > 1 || detectedGenders.includes('Woman')) {
             console.log('Woman detected or multiple zones - GUIDANCE NEEDED');
             setAlarm('alert', 'Zone guidance needed');
         } else {
@@ -143,8 +143,8 @@ function checkZoneAlarm(detectedGenders) {
     // Case 3: Only Woman switch ON
     if (womanEnabled && !manEnabled) {
         console.log('Only Woman switch ON - checking detected zones');
-        // Check for Man (assuming 0 = Man, 1 = Woman) or multiple zones
-        if (detectedGenders.length === 2 || detectedGenders.includes(1)) {
+        // Check for Man or multiple zones
+        if (detectedGenders.length > 1 || detectedGenders.includes('Man')) {
             console.log('Man detected or multiple zones - GUIDANCE NEEDED');
             setAlarm('alert', 'Zone guidance needed');
         } else {
